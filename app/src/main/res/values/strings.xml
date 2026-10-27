@@ -88,7 +88,7 @@
     <string name="install_done">Install finished, version: %1$s</string>
 
     <string name="illegal_apk_title">Illegal APK</string>
-    <string name="not_mc_apk">Not a Minecraft APK</string>
+    <string name="not_mc_apk">Not a Minecraft APK (libminecraftpe.so was not found in it)</string>
     <string name="not_apk_or_apks">Please select an APK or APKS file</string>
 
     <string name="not_found_version">No version found</string>
@@ -914,8 +914,9 @@
     <string name="select_image">Select Image</string>
     <string name="clear">Clear</string>
 
-    <string name="unsupported_version_title">Unsupported Version</string>
-    <string name="unsupported_version_msg">This launcher does not support Minecraft versions older than 1.21.80.</string>
+    <string name="unsupported_version_title">Untested Version</string>
+    <string name="unsupported_version_msg">This Minecraft version is older than 1.21.80 and has not been tested with this launcher. It may crash, and some built-in mods may not work.</string>
+    <string name="unsupported_version_launch_anyway">Launch anyway</string>
 
     <!-- Generic UI strings added during localization cleanup -->
     <string name="close">Close</string>

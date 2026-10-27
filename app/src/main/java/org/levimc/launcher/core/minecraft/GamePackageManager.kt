@@ -48,6 +48,8 @@ class GamePackageManager private constructor(
 
     private val extractableLibs = requiredLibs + optionalLibs
 
+    private val preloadedDependencies = HashSet<String>()
+
     private val systemLoadedLibs = arrayOf(
         "libPlayFabMultiplayer.so",
         "libmaesdk.so",
@@ -536,7 +538,12 @@ class GamePackageManager private constructor(
         return if (libFile.exists() && libFile.length() > 0) {
             try {
                 ensureReadOnly(libFile)
-                System.load(libFile.absolutePath)
+                try {
+                    System.load(libFile.absolutePath)
+                } catch (e: UnsatisfiedLinkError) {
+                    if (preloadBundledDependencies(libFile) == 0) throw e
+                    System.load(libFile.absolutePath)
+                }
                 LibraryLoadResult(normalizedName, fileName, source, true, elapsedSince(startedAt), libFile.absolutePath)
             } catch (e: UnsatisfiedLinkError) {
                 val detail = e.message ?: e.javaClass.simpleName
@@ -552,6 +559,42 @@ class GamePackageManager private constructor(
             Log.w(TAG, detail)
             LibraryLoadResult(normalizedName, fileName, source, false, elapsedSince(startedAt), detail)
         }
+    }
+
+    /**
+     * Modified APKs, such as custom renderer builds, can add libraries that libminecraftpe.so
+     * (or another game library) depends on. The linker does not search the library cache for
+     * dependencies, so the ones found there are loaded by path, dependencies first. Libraries the
+     * launcher already manages are left to the normal load order. Returns how many were loaded.
+     */
+    @SuppressLint("UnsafeDynamicallyLoadedCode")
+    fun preloadBundledDependencies(libFile: File): Int {
+        val managedLibs = (extractableLibs + systemLoadedLibs).toSet()
+        val visited = HashSet<String>()
+        var loaded = 0
+
+        fun visit(file: File) {
+            for (dependency in ElfDependencies.read(file)) {
+                if (dependency in managedLibs || !visited.add(dependency)) continue
+                val dependencyFile = File(nativeLibDir, dependency)
+                if (!dependencyFile.isFile || dependencyFile.length() == 0L) continue
+                visit(dependencyFile)
+                if (!preloadedDependencies.add(dependencyFile.absolutePath)) continue
+                try {
+                    ensureReadOnly(dependencyFile)
+                    System.load(dependencyFile.absolutePath)
+                    loaded++
+                    report("Loaded bundled dependency $dependency of ${file.name}")
+                } catch (e: Throwable) {
+                    preloadedDependencies.remove(dependencyFile.absolutePath)
+                    Log.w(TAG, "Failed to load bundled dependency $dependency: ${e.message}")
+                    report("Failed to load bundled dependency $dependency: ${e.message}")
+                }
+            }
+        }
+
+        visit(libFile)
+        return loaded
     }
 
     fun loadAllLibraries(

@@ -18,9 +18,23 @@ game.
 
 ## Minecraft Versions
 
-The app currently rejects Minecraft versions older than 1.21.80. Imported
-versions should use version isolation when their data should remain separate
-from the installed version.
+Minecraft 1.21.80 and later are tested. Older versions can still be launched:
+the launcher shows a warning first, because they may crash and some built-in
+mods may not work with them. Imported versions should use version isolation
+when their data should remain separate from the installed version.
+
+## Modified APKs
+
+Modified Minecraft APKs, for example builds with a changed renderer, can be
+imported. An APK is accepted when it has the official package name or when it
+contains `libminecraftpe.so`, so repacked APKs with a different package name
+work too. Extra native libraries that the modified game depends on are loaded
+from the APK automatically. If the launcher cannot read the version from the
+APK, the suggested name is `Minecraft_custom`; rename it to include the game
+version (for example `Minecraft_1.21.100_vulkan`) so the launcher picks the
+right loading path for that version.
+
+The official Minecraft app from Google Play is still required.
 
 ## Storage and Migration
 

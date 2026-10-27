@@ -28,6 +28,9 @@ def getGitTag() {
     return tag
 }
 
+// Builds without real Firebase credentials (forks, local builds) pass -PdisableCrashlyticsUpload.
+def crashlyticsUploadEnabled = !project.hasProperty('disableCrashlyticsUpload')
+
 static def getVersionCodeByTimestamp() {
     def baseDate = Date.parse("yyyy-MM-dd HH:mm:ss", "2025-01-01 00:00:00")
     def now = new Date()
@@ -77,8 +80,8 @@ android {
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             firebaseCrashlytics {
-                mappingFileUploadEnabled true
-                nativeSymbolUploadEnabled true
+                mappingFileUploadEnabled crashlyticsUploadEnabled
+                nativeSymbolUploadEnabled crashlyticsUploadEnabled
             }
             ndk {
                 debugSymbolLevel 'FULL'
@@ -91,8 +94,8 @@ android {
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             firebaseCrashlytics {
-                mappingFileUploadEnabled true
-                nativeSymbolUploadEnabled true
+                mappingFileUploadEnabled crashlyticsUploadEnabled
+                nativeSymbolUploadEnabled crashlyticsUploadEnabled
             }
             ndk {
                 debugSymbolLevel 'FULL'
@@ -105,8 +108,8 @@ android {
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             firebaseCrashlytics {
-                mappingFileUploadEnabled true
-                nativeSymbolUploadEnabled true
+                mappingFileUploadEnabled crashlyticsUploadEnabled
+                nativeSymbolUploadEnabled crashlyticsUploadEnabled
             }
             resValue "string", "app_name", "LeviLauncher Beta"
             buildConfigField "boolean", "IS_BETA", "true"

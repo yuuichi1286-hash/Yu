@@ -8,9 +8,6 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-
 import org.levimc.launcher.core.minecraft.MinecraftLauncher;
 import org.levimc.launcher.core.versions.VersionProfileMetadataStore;
 
@@ -291,19 +288,11 @@ public class ApkInstaller {
     }
 
     private String extractApkVersionName(File apkFile) {
-        try {
-            PackageManager pm = context.getPackageManager();
-            PackageInfo info = pm.getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
-            if (info != null) {
-                String pkgName = info.packageName;
-                String vName = info.versionName;
-                if ("com.mojang.minecraftpe".equals(pkgName) && vName != null && !vName.isEmpty()) {
-                    return vName;
-                }
-            }
-        } catch (Exception ignored) {
+        String versionName = ApkUtils.readMinecraftVersionName(context, apkFile);
+        if (versionName == null || ApkUtils.UNKNOWN_VERSION_NAME.equals(versionName)) {
+            return "unknown_version";
         }
-        return "unknown_version";
+        return versionName;
     }
 
     private String getFileName(Uri uri) {

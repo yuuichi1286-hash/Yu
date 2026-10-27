@@ -90,7 +90,13 @@ object MinecraftRuntimePreparer {
                 ?: throw RuntimeException("libminecraftpe.so not found in the Minecraft library cache")
             trace.mark("Minecraft dependency graph loading started", libraryPath)
             try {
-                NativeBridgeHelper.loadMinecraftRuntime(libraryPath)
+                try {
+                    NativeBridgeHelper.loadMinecraftRuntime(libraryPath)
+                } catch (error: UnsatisfiedLinkError) {
+                    if (gameManager.preloadBundledDependencies(File(libraryPath)) == 0) throw error
+                    trace.mark("Bundled dependencies loaded, retrying Minecraft runtime", libraryPath)
+                    NativeBridgeHelper.loadMinecraftRuntime(libraryPath)
+                }
             } catch (error: UnsatisfiedLinkError) {
                 trace.error("Minecraft dependency graph load failed", error.message ?: "unknown error")
                 throw RuntimeException("Failed to load the Minecraft runtime: ${error.message}", error)

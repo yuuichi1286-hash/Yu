@@ -96,36 +96,57 @@ public class MinecraftLauncher {
                 return;
             }
 
-            if (version.versionCode != null) {
-                try {
-                    String[] parts = version.versionCode.split("\\.");
-                    if (parts.length >= 2) {
-                        int major = Integer.parseInt(parts[0].replaceAll("\\D", ""));
-                        int minor = Integer.parseInt(parts[1].replaceAll("\\D", ""));
-                        int patch = 0;
-                        if (parts.length > 2) {
-                            String patchStr = parts[2].replaceAll("\\D.*", "");
-                            if (!patchStr.isEmpty()) {
-                                patch = Integer.parseInt(patchStr);
-                            }
-                        }
-                        if (major < 1 || (major == 1 && minor < 21) || (major == 1 && minor == 21 && patch < 80)) {
-                            activity.runOnUiThread(() -> {
-                                new org.levimc.launcher.ui.dialogs.CustomAlertDialog(activity)
-                                        .setTitleText(activity.getString(org.levimc.launcher.R.string.unsupported_version_title))
-                                        .setMessage(activity.getString(org.levimc.launcher.R.string.unsupported_version_msg))
-                                        .setPositiveButton(activity.getString(org.levimc.launcher.R.string.back), null)
-                                        .show();
-                            });
-                            notifyLaunchFailed(callback, new IllegalStateException("Unsupported version"));
-                            return;
-                        }
-                    }
-                } catch (Exception e) {
-                    // Ignore parsing errors and let it launch
-                }
+            if (isOlderThanTestedVersion(version.versionCode)) {
+                activity.runOnUiThread(() -> {
+                    org.levimc.launcher.ui.dialogs.CustomAlertDialog dialog = new org.levimc.launcher.ui.dialogs.CustomAlertDialog(activity)
+                            .setTitleText(activity.getString(R.string.unsupported_version_title))
+                            .setMessage(activity.getString(R.string.unsupported_version_msg))
+                            .setPositiveButton(activity.getString(R.string.unsupported_version_launch_anyway),
+                                    v -> continueLaunch(sourceIntent, version, callback))
+                            .setNegativeButton(activity.getString(R.string.back),
+                                    v -> notifyLaunchFailed(callback, new IllegalStateException("Launch cancelled for untested version")));
+                    dialog.setCancelable(false);
+                    dialog.show();
+                });
+                return;
             }
 
+            continueLaunch(sourceIntent, version, callback);
+        } catch (Exception e) {
+            Log.e(TAG, "Launch failed: " + e.getMessage(), e);
+            showLaunchErrorOnUi("Launch failed: " + e.getMessage());
+            notifyLaunchFailed(callback, e);
+        }
+    }
+
+    /**
+     * Versions older than 1.21.80 were never tested with this launcher. They are no longer
+     * rejected, the user is only warned before launching them.
+     */
+    static boolean isOlderThanTestedVersion(String versionCode) {
+        if (versionCode == null) return false;
+        try {
+            String[] parts = versionCode.split("\\.");
+            if (parts.length < 2) return false;
+            int major = Integer.parseInt(parts[0].replaceAll("\\D", ""));
+            int minor = Integer.parseInt(parts[1].replaceAll("\\D", ""));
+            int patch = 0;
+            if (parts.length > 2) {
+                String patchStr = parts[2].replaceAll("\\D.*", "");
+                if (!patchStr.isEmpty()) {
+                    patch = Integer.parseInt(patchStr);
+                }
+            }
+            return major < 1 || (major == 1 && minor < 21) || (major == 1 && minor == 21 && patch < 80);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void continueLaunch(Intent sourceIntent, GameVersion version, LaunchCallback callback) {
+        Activity activity = (Activity) context;
+
+        try {
             if (version.needsRepair) {
                 activity.runOnUiThread(() ->
                         org.levimc.launcher.core.versions.VersionManager.attemptRepairLibs(activity, version)
