@@ -34,6 +34,14 @@ APK, the suggested name is `Minecraft_custom`; rename it to include the game
 version (for example `Minecraft_1.21.100_vulkan`) so the launcher picks the
 right loading path for that version.
 
+Mods built into the APK, such as a renderer or shader mod menu, are started too.
+The launcher runs its own copy of Minecraft's `MainActivity`, so it reads the
+imported APK's `MainActivity` and repeats what the mod added there: native
+libraries loaded with `System.loadLibrary` and static calls such as
+`Menu.Start(this)`. A mod menu that is started as a separate service declared
+in the APK's manifest, or that relies on the APK's own layouts, can't run
+this way.
+
 The official Minecraft app from Google Play is still required.
 
 ## Storage and Migration

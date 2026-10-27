@@ -39,6 +39,7 @@ class MinecraftActivity : MainActivity(), PojavControlsHost {
 
     private lateinit var gameManager: GamePackageManager
     private lateinit var trace: LaunchTrace
+    private var apkMods: ApkModLoader.Plan? = null
     private var overlayManager: InbuiltOverlayManager? = null
     private var normalExitPrepared = false
     private var normalExitRestartScheduled = false
@@ -112,6 +113,7 @@ class MinecraftActivity : MainActivity(), PojavControlsHost {
             val preparedRuntime = MinecraftLaunchSession.getPreparedRuntime()
                 ?: MinecraftRuntimePreparer.prepare(applicationContext, intent)
             gameManager = preparedRuntime.gameManager
+            apkMods = preparedRuntime.apkMods
             configureMinecraftFirebase()
             trace.mark("Prepared runtime consumed")
         } catch (throwable: Throwable) {
@@ -133,6 +135,9 @@ class MinecraftActivity : MainActivity(), PojavControlsHost {
             return
         }
         trace.mark("Mojang MainActivity super.onCreate finished")
+        apkMods?.let { plan ->
+            ApkModLoader.startEntryPoints(this, plan, gameManager) { message -> trace.mark("APK mod", message) }
+        }
 
         MinecraftForegroundService.startIfEnabled(this)
 

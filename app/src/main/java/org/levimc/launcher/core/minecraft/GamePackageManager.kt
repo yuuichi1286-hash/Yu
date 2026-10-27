@@ -697,6 +697,12 @@ class GamePackageManager private constructor(
 
     fun getPackageContext(): Context = packageContext
 
+    fun getApkFiles(): List<File> = collectApkFiles()
+
+    fun getNativeLibraryDir(): String = nativeLibDir
+
+    fun isManagedLibrary(fileName: String): Boolean = fileName in extractableLibs || fileName in systemLoadedLibs
+
     fun getApplicationInfo(): ApplicationInfo = applicationInfo
 
     fun getVersionName(): String? {

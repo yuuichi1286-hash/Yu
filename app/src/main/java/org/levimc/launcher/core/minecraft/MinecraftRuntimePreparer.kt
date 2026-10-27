@@ -21,7 +21,9 @@ object MinecraftRuntimePreparer {
     data class PreparedRuntime(
         val version: GameVersion?,
         val gameManager: GamePackageManager,
-        val skippedIncompatibleMods: List<String> = emptyList()
+        val skippedIncompatibleMods: List<String> = emptyList(),
+        /** Mod code from a modified APK that runs once the game activity exists. */
+        val apkMods: ApkModLoader.Plan? = null
     )
 
     private data class NativeModLoadResult(
@@ -119,6 +121,20 @@ object MinecraftRuntimePreparer {
         listener.onLog("Loading native libraries")
         loadMinecraftLibraries(gameManager, version, listener, trace)
 
+        var apkMods: ApkModLoader.Plan? = null
+        if (!version.isInstalled) {
+            listener.onProgress(76, "Loading mods from APK")
+            apkMods = try {
+                ApkModLoader.prepare(gameManager) { message ->
+                    listener.onLog(message)
+                    trace.mark("APK mod", message)
+                }
+            } catch (error: Exception) {
+                trace.warning("APK mod scan failed", error.message ?: error.javaClass.simpleName)
+                null
+            }
+        }
+
         listener.onProgress(78, "Loading enabled mods")
         listener.onLog("Loading native mods")
 
@@ -158,7 +174,7 @@ object MinecraftRuntimePreparer {
 
         listener.onProgress(100, "Runtime ready", "Entering Minecraft")
         trace.milestone("Runtime preparation finished")
-        return PreparedRuntime(version, gameManager, nativeModResult.skippedIncompatibleMods)
+        return PreparedRuntime(version, gameManager, nativeModResult.skippedIncompatibleMods, apkMods)
     }
 
     @JvmStatic
