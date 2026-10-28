@@ -11,7 +11,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Finds what a modified Minecraft APK adds to Mojang's activity classes.
+ * Finds what a modified Minecraft APK adds to Mojang's activity and application classes.
  *
  * The launcher runs its own copy of {@code com.mojang.minecraftpe.MainActivity}, so code that a
  * mod injects into the APK's MainActivity (usually {@code System.loadLibrary("menu")} or a static
@@ -168,9 +168,11 @@ public final class ApkDexScanner {
                 int classDataOff = buffer.getInt(def + 24);
                 if (classDataOff == 0) continue;
 
-                boolean host = hostClasses.contains(descriptor)
-                        || (descriptor.startsWith(MINECRAFT_PACKAGE)
-                        && superIdx != NO_INDEX && APPLICATION_CLASS.equals(typeName(superIdx)));
+                // Modified APKs often swap in their own Application class (set in the manifest) to
+                // load the mod; the launcher's own Application replaces it just like MainActivity.
+                boolean application = superIdx != NO_INDEX && APPLICATION_CLASS.equals(typeName(superIdx))
+                        && (descriptor.startsWith(MINECRAFT_PACKAGE) || !isVendorType(descriptor));
+                boolean host = hostClasses.contains(descriptor) || application;
                 if (host) {
                     scanClass(classDataOff, result.hostLibraries, result.entryPoints);
                 } else if (!isVendorType(descriptor)) {

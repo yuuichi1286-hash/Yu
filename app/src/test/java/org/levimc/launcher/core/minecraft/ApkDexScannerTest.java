@@ -60,6 +60,30 @@ public class ApkDexScannerTest {
     }
 
     @Test
+    public void librariesLoadedByACustomApplicationClassAreHostLibraries() {
+        DexBuilder dex = new DexBuilder();
+        int loadLibrary = dex.method("Ljava/lang/System;", "loadLibrary", "V", "Ljava/lang/String;");
+        int onCreate = dex.method("Lcom/modder/MinecraftApplication;", "onCreate", "V");
+        int helperInit = dex.method("Lcom/modder/Helper;", "<clinit>", "V");
+        dex.classDef("Lcom/modder/MinecraftApplication;", "Landroid/app/Application;", onCreate, concat(
+                constString(0, dex.string("rendermod")),
+                invokeStatic(loadLibrary, 0),
+                new int[] {0x000E}
+        ));
+        dex.classDef("Lcom/modder/Helper;", "Ljava/lang/Object;", helperInit, concat(
+                constString(0, dex.string("helperlib")),
+                invokeStatic(loadLibrary, 0),
+                new int[] {0x000E}
+        ));
+
+        ApkDexScanner.Result result = new ApkDexScanner.Result();
+        new ApkDexScanner().scan(dex.build(), result);
+
+        assertEquals(Collections.singleton("rendermod"), result.hostLibraries);
+        assertEquals(Collections.singleton("helperlib"), result.modClassLibraries);
+    }
+
+    @Test
     public void vanillaActivityReportsNothingToRun() {
         DexBuilder dex = new DexBuilder();
         int loadLibrary = dex.method("Ljava/lang/System;", "loadLibrary", "V", "Ljava/lang/String;");

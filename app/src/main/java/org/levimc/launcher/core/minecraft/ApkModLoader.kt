@@ -16,7 +16,7 @@ import java.util.zip.ZipFile
 object ApkModLoader {
     private const val TAG = "ApkModLoader"
     private const val CACHE_FILE_NAME = ".apk_mods"
-    private const val CACHE_VERSION = 1
+    private const val CACHE_VERSION = 2
     private val DEX_ENTRY = Regex("classes\\d*\\.dex")
 
     /** Libraries that ship with the game or its SDKs; the launcher loads them itself when needed. */
@@ -46,10 +46,16 @@ object ApkModLoader {
         val result = loadCachedScan(dexApks, File(nativeLibDir, CACHE_FILE_NAME)) ?: return null
         if (result.isEmpty()) return null
 
-        val extraLibraries = result.hostLibraries.filter {
+        // Only libraries the APK actually ships; names from SDK code paths it does not use are ignored.
+        val extraLibraries = (result.hostLibraries + result.modClassLibraries).filter {
             it !in VANILLA_LIBRARIES && !gameManager.isManagedLibrary("lib$it.so")
+                && File(nativeLibDir, "lib$it.so").let { file -> file.isFile && file.length() > 0 }
         }
-        val (deferred, loadNow) = extraLibraries.partition { it in result.modClassLibraries }
+        // A library that mod classes load is left to them when the launcher will run that code;
+        // otherwise, for example when the APK's own Application class loaded it, it is loaded now.
+        val (deferred, loadNow) = extraLibraries.partition {
+            it in result.modClassLibraries && result.entryPoints.isNotEmpty()
+        }
         for (library in loadNow) {
             val loadResult = gameManager.loadLibraryDetailed(library)
             if (loadResult.loaded) {
