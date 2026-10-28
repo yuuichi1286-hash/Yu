@@ -917,6 +917,9 @@
     <string name="unsupported_version_title">Untested Version</string>
     <string name="unsupported_version_msg">This Minecraft version is older than 1.21.80 and has not been tested with this launcher. It may crash, and some built-in mods may not work.</string>
     <string name="unsupported_version_launch_anyway">Launch anyway</string>
+    <string name="apk_mod_loaded">Mod from APK loaded: %1$s</string>
+    <string name="apk_mod_failed">Mod from APK failed to load:\n%1$s</string>
+    <string name="apk_mod_none">No mod library was found in the imported APK</string>
 
     <!-- Generic UI strings added during localization cleanup -->
     <string name="close">Close</string>

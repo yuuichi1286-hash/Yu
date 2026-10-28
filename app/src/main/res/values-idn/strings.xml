@@ -912,6 +912,9 @@
     <string name="unsupported_version_title">Versi Belum Diuji</string>
     <string name="unsupported_version_msg">Versi Minecraft ini lebih lama dari 1.21.80 dan belum diuji dengan peluncur ini. Game bisa crash, dan beberapa mod bawaan mungkin tidak berfungsi.</string>
     <string name="unsupported_version_launch_anyway">Tetap jalankan</string>
+    <string name="apk_mod_loaded">Mod dari APK dimuat: %1$s</string>
+    <string name="apk_mod_failed">Mod dari APK gagal dimuat:\n%1$s</string>
+    <string name="apk_mod_none">Tidak ada library mod yang ditemukan di APK yang diimpor</string>
 
     <!-- Generic UI strings added during localization cleanup -->
     <string name="close">Tutup</string>

@@ -138,6 +138,9 @@ class MinecraftActivity : MainActivity(), PojavControlsHost {
         apkMods?.let { plan ->
             ApkModLoader.startEntryPoints(this, plan, gameManager) { message -> trace.mark("APK mod", message) }
         }
+        ApkModLoader.takeReport(this)?.let { report ->
+            android.widget.Toast.makeText(this, report, android.widget.Toast.LENGTH_LONG).show()
+        }
 
         MinecraftForegroundService.startIfEnabled(this)
 

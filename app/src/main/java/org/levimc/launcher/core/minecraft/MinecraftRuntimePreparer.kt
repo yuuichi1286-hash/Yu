@@ -131,6 +131,9 @@ object MinecraftRuntimePreparer {
                 }
             } catch (error: Exception) {
                 trace.warning("APK mod scan failed", error.message ?: error.javaClass.simpleName)
+                ApkModLoader.recordFailure("scan failed: ${error.message ?: error.javaClass.simpleName}") { message ->
+                    listener.onLog(message)
+                }
                 null
             }
         }
