@@ -5,7 +5,7 @@ and L/R stereo swap) that adds Discord-style noise suppression to every
 microphone path on any Android device, plus an optional natural "deep
 voice" (pitch-shifted speech with preserved formants and a bass shelf).
 
-- Flashable zip: [`release/Mic_VolBoost_Swap_A2L-v3.2.zip`](release/Mic_VolBoost_Swap_A2L-v3.2.zip)
+- Flashable zip: [`release/Mic_VolBoost_Swap_A2L-v3.3.zip`](release/Mic_VolBoost_Swap_A2L-v3.3.zip)
 - User guide (Bahasa Indonesia): [`module/README.md`](module/README.md)
 
 ## Layout
@@ -33,7 +33,15 @@ voice" (pitch-shifted speech with preserved formants and a bass shelf).
    tracker, and limiter). VoIP gets the device's AEC + NS followed by
    `micns_call` (the same chain without the leveler), last in the chain so
    it only ever sees echo-cancelled audio.
-3. Qualcomm HALs hand capture-side noise suppression to the DSP: the same
+3. Qualcomm HALs never run software effects, so there the module puts
+   `audio.primary.micns.so` in front of the real HAL
+   (`ro.hardware.audio.primary=micns`): it loads the platform HAL, wraps
+   `open/close_input_stream` and the `read()` of each capture stream, and
+   runs MicNS in place on what the HAL (and its DSP AEC/NS) returns
+   (`micns/src/micns_hal.c`, tested against a fake HAL in
+   `micns/test/hal_test.c`). `service.sh` removes it again if audio does not
+   come up or audioserver keeps restarting.
+4. Qualcomm HALs hand capture-side noise suppression to the DSP: the same
    config entries switch on its ECNS/NS devices, and the installer enables
    Fluence (multi-mic NS) for calls, speakerphone, voice typing and
    recording when the device supports it.

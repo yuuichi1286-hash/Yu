@@ -26,6 +26,9 @@ runner_for() {
 
 echo "== host build under ASan/UBSan"
 LD_LIBRARY_PATH="$T/host-asan" "$T/host-asan/harness" "$T/host-asan/libmicns.so" selftest 80
+echo "== host build under ASan/UBSan: HAL hook"
+LD_LIBRARY_PATH="$T/host-asan" "$T/host-asan/hal_test" "$T/host-asan/audio.primary.micns.so" \
+  "$T/host-asan/libmicns.so" "$T/host-asan/fakehal.so"
 
 for abi in x86_64 x86 arm64-v8a armeabi-v7a; do
   runner="$(runner_for "$abi")"
@@ -42,6 +45,13 @@ for abi in x86_64 x86 arm64-v8a armeabi-v7a; do
       "$AUDIO/ms_noise_CopyMachine_1.wav" "$AUDIO/ms_noise_Typing_1.wav" "$AUDIO/ms_noise_Babble_1.wav" \
       --rates 16000,48000 --variant "$variant" --runner "$runner"
   done
+  # 32-bit bionic's RTLD_NOW is glibc's "no mode", so only 64-bit runs here
+  if [ "$abi" = x86_64 ] || [ "$abi" = arm64-v8a ]; then
+    echo "== $abi: HAL hook"
+    # shellcheck disable=SC2086
+    LD_LIBRARY_PATH="$T/$abi" $runner "$T/$abi/hal_test" "$OUT/$abi/audio.primary.micns.so" "$lib" \
+      "$T/$abi/fakehal.so"
+  fi
   echo "== $abi: deep voice"
   LD_LIBRARY_PATH="$T/$abi" python3 "$HERE/audio_test.py" deep "$T/$abi/harness" "$lib" \
     "$AUDIO/ms_clean_clnsp2.wav" "$AUDIO/ms_clean_clnsp4.wav" --runner "$runner"

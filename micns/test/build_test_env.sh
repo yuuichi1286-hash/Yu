@@ -27,6 +27,12 @@ shims() { # cc flags dir
   # shellcheck disable=SC2086
   $cc $flags -shared -fPIC -Wl,-soname,libm.so -o "$dir/libm.so" "$HERE/empty_shim.c"
   # shellcheck disable=SC2086
+  $cc $flags -shared -fPIC -Wl,-soname,libdl.so -o "$dir/libdl.so" "$HERE/empty_shim.c"
+  # shellcheck disable=SC2086
+  $cc $flags -shared -fPIC -DFAKE_HAL -I "$SRC" -o "$dir/fakehal.so" "$HERE/hal_test.c"
+  # shellcheck disable=SC2086
+  $cc $flags -O1 -g -I "$SRC" -o "$dir/hal_test" "$HERE/hal_test.c" -Wl,--no-as-needed -lm -ldl
+  # shellcheck disable=SC2086
   $cc $flags -O1 -g -o "$dir/harness" "$HERE/harness.c" -Wl,--no-as-needed -lm -ldl
 }
 
@@ -42,6 +48,12 @@ gcc -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
   "${SRCS[@]}" -L"$T/host" -llog -lm
 gcc -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
   -o "$T/host-asan/harness" "$HERE/harness.c" -Wl,--no-as-needed -lm -ldl
+# shellcheck disable=SC2054 # the comma belongs to -fsanitize
+ASAN=(-O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -I "$SRC" -I "$HERE/hostinc")
+gcc "${ASAN[@]}" -shared -fPIC -o "$T/host-asan/audio.primary.micns.so" "$SRC/micns_hal.c" \
+  "$HERE/empty_shim.c" -L"$T/host" -llog -ldl
+gcc "${ASAN[@]}" -shared -fPIC -DFAKE_HAL -o "$T/host-asan/fakehal.so" "$HERE/hal_test.c"
+gcc "${ASAN[@]}" -o "$T/host-asan/hal_test" "$HERE/hal_test.c" -Wl,--no-as-needed -ldl
 
 # Loaders for the Android builds.
 shims clang "" "$T/x86_64"

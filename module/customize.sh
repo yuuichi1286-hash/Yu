@@ -7,7 +7,7 @@ COMMON=$MODPATH/common
 REPORT=$MODPATH/micns_report.txt
 
 ui_print "*******************************************"
-ui_print "  Mic Boost + AI Noise Suppression  v3.2   "
+ui_print "  Mic Boost + AI Noise Suppression  v3.3   "
 ui_print "  AI NS - Deep Voice - Fluence - AEC - A2L  "
 ui_print "*******************************************"
 
@@ -44,6 +44,7 @@ report "- Manager: $MANAGER"
 # 1. MicNS AI noise suppression library (RNNoise)
 # ---------------------------------------------------------------------------
 MICNS=0
+HOOKED=""
 if [ "$API" -ge 26 ]; then FXROOT=/vendor; FXBASE=$MODPATH/system/vendor; else FXROOT=/system; FXBASE=$MODPATH/system; fi
 if [ "$(setting AI_NS 1)" = 1 ]; then
   case "$ARCH" in
@@ -65,6 +66,38 @@ if [ "$(setting AI_NS 1)" = 1 ]; then
     report "- AI noise suppression (RNNoise): installed for $ABIS"
   else
     report "- AI noise suppression: no build for $ARCH, using the device's own NS"
+  fi
+
+  # Qualcomm HALs never run software effects: put the hook in front of the
+  # real audio HAL instead (micns/src/micns_hal.c). service.sh takes it out
+  # again by itself if audio does not come up with it.
+  HOOK=$(setting HAL_HOOK auto)
+  if [ $MICNS = 1 ] && { [ "$HOOK" = force ] || { [ "$HOOK" = auto ] && [ "$SOC" = qcom ]; }; }; then
+    if [ -f "/data/adb/modules/$MODID/hal_hook_off" ] && [ "$HOOK" != force ]; then
+      report "- HAL hook: switched itself off after an audio problem (HAL_HOOK=force retries)"
+      cp -f "/data/adb/modules/$MODID/hal_hook_off" "$MODPATH/"
+    else
+      V=$(hal_variant)
+      for pair in $ABIS; do
+        abi=${pair%%:*}
+        dir=${pair##*:}
+        orig=""
+        for d in /odm /vendor /system; do
+          [ -n "$V" ] && [ -f "$d/$dir/hw/audio.primary.$V.so" ] && { orig=$d/$dir/hw/audio.primary.$V.so; break; }
+        done
+        if [ -z "$orig" ] || [ ! -f "$MODPATH/lib/$abi/$HOOK_LIB" ]; then continue; fi
+        mkdir -p "$MODPATH/system/vendor/$dir/hw"
+        cp -f "$MODPATH/lib/$abi/$HOOK_LIB" "$MODPATH/system/vendor/$dir/hw/$HOOK_LIB"
+        b=32
+        [ "$dir" = lib64 ] && b=64
+        HOOKED="$HOOKED hal$b=$orig fx$b=$FXROOT/$dir/soundfx/$MICNS_LIB"
+      done
+      if [ -n "$HOOKED" ]; then
+        report "- HAL hook: AI NS + deep voice in front of audio.primary.$V.so"
+      else
+        report "- HAL hook: no classic audio HAL found (AIDL HAL?), not installed"
+      fi
+    fi
   fi
 else
   report "- AI noise suppression: off in settings.conf"
@@ -91,6 +124,14 @@ deep_pitch=$(setting DEEP_PITCH -2.5)
 deep_formant=$(setting DEEP_FORMANT -5)
 deep_bass=$(setting DEEP_BASS 5)
 EOF
+  if [ -n "$HOOKED" ]; then
+    {
+      echo "# HAL hook: the real audio HAL, the effect library, extra sources"
+      for kv in $HOOKED; do echo "$kv"; done
+      echo "hal_voip=$(setting NS_VOIP_AI 1)"
+      echo "hal_camcorder=$(setting NS_CAMCORDER 0)"
+    } >> "$FXBASE/etc/micns.conf"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -232,6 +273,10 @@ elif is_daisy; then
   report "- Mi A2 Lite: $MIXER not found on this ROM, mixer left untouched"
 fi
 rm -rf "${MODPATH:?}/devices"
+
+# libhardware loads audio.primary.micns.so (the HAL hook) instead of the
+# platform's HAL while this property is set.
+[ -n "$HOOKED" ] && echo "ro.hardware.audio.primary=micns" >> "$MODPATH/system.prop"
 
 # ---------------------------------------------------------------------------
 # 5. Permissions and SELinux labels

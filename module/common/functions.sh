@@ -5,6 +5,7 @@
 
 # shellcheck disable=SC2034 # used by customize.sh
 MICNS_LIB=libmicns.so
+HOOK_LIB=audio.primary.micns.so
 
 # Prints to the installer console when there is one, stdout otherwise.
 say() {
@@ -134,6 +135,24 @@ $_key=$_val"
   printf '%s\n' "$_new" > "$_file"
 }
 
+# The audio HAL libhardware loads (audio.primary.<variant>.so), found the
+# way it does: the vendor's ro.hardware.audio.primary, then ro.hardware,
+# ro.product.board, ro.board.platform, ro.arch. "micns" is our own hook.
+hal_variant() {
+  _vp=$(cat /odm/etc/build.prop /vendor/odm/etc/build.prop /vendor/build.prop /system/build.prop \
+    2>/dev/null | sed -n 's/^ro\.hardware\.audio\.primary=//p' | head -n 1)
+  for _v in "$_vp" "$(prop ro.hardware)" "$(prop ro.product.board)" "$(prop ro.board.platform)" \
+    "$(prop ro.arch)" default; do
+    { [ -z "$_v" ] || [ "$_v" = micns ]; } && continue
+    for _d in /odm /vendor /system; do
+      for _l in lib64 lib; do
+        [ -f "$_d/$_l/hw/audio.primary.$_v.so" ] && { echo "$_v"; return 0; }
+      done
+    done
+  done
+  return 1
+}
+
 # Prefix the module description with a live status line, e.g.
 # "[AI NS: on | NS configs: 2 | Fluence: on]".
 update_description() {
@@ -144,13 +163,16 @@ update_description() {
   [ -z "$_c" ] && _ai="n/a"
   _dp=off
   [ -n "$_c" ] && grep -q '^deep=1' "$_c" && _dp=on
+  _hk=off
+  [ "$(getprop ro.hardware.audio.primary)" = micns ] && _hk=on
+  [ -f "$1/hal_hook_off" ] && _hk=failed
   _n=0
   for _f in $(effect_configs); do grep -q 'micns:' "$_f" 2>/dev/null && _n=$((_n + 1)); done
   _fl=$(getprop persist.vendor.audio.fluence.voicecall)
   [ -z "$_fl" ] && _fl=$(getprop persist.audio.fluence.voicecall)
   case "$_fl" in true) _fl=on ;; "") _fl="n/a" ;; *) _fl=off ;; esac
   _d=$(sed -n 's/^description=//p' "$_mp" | sed 's/^\[[^]]*\] *//')
-  _new=$(awk -v d="description=[AI NS: $_ai | Deep: $_dp | NS configs: $_n | Fluence: $_fl] $_d" \
+  _new=$(awk -v d="description=[AI NS: $_ai | Deep: $_dp | HAL hook: $_hk | NS configs: $_n | Fluence: $_fl] $_d" \
     '/^description=/ { print d; next } { print }' "$_mp")
   printf '%s\n' "$_new" > "$_mp"
 }

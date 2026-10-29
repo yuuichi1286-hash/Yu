@@ -83,6 +83,7 @@ for p in "${PROFILES[@]}"; do
       unzip -p "$ZIP" devices/daisy/mixer_paths_mtp_global.xml > "$FR/vendor/etc/mixer_paths_mtp_global.xml"
       dummy /vendor/lib/soundfx/libqcomvoiceprocessing.so
       dummy /vendor/lib64/soundfx/libqcomvoiceprocessing.so
+      dummy /vendor/lib64/hw/audio.primary.msm8953.so
       write_driver "$FR" 29 arm64
       ;;
     mtk)

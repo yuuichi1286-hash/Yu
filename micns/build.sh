@@ -26,9 +26,10 @@ SRCS=(
 )
 
 # Everything the library may import from bionic, by library.
-LIBC_SYMS="malloc calloc realloc free memcpy memmove memset memcmp strlen strcmp strchr strtol abort fopen fgets fclose"
+LIBC_SYMS="malloc calloc realloc free memcpy memmove memset memcmp strlen strcmp strchr strtol abort fopen fgets fclose access __system_property_get"
 LIBM_SYMS="sqrt exp log log10 pow cos sin floor fabs sqrtf expf logf log10f powf cosf sinf floorf fabsf"
 LIBLOG_SYMS="__android_log_print"
+LIBDL_SYMS="dlopen dlsym dlerror"
 
 COMMON_CFLAGS=(
   -O2 -fPIC -fvisibility=hidden -fno-stack-protector -fno-math-errno
@@ -69,6 +70,27 @@ stub_lib() { # abi flags name syms...
     -Wl,-soname,"$name.so" -o "$dir/$name.so" "$c"
 }
 
+# Every import must be one we stub; anything else (stack protector,
+# 64-bit division helpers, ...) would fail to resolve on a device.
+check_imports() { # abi objs...
+  local abi="$1" undef defined s missing=()
+  shift
+  undef="$(llvm-nm -u --format=just-symbols "$@" | sort -u)"
+  defined="$(llvm-nm --defined-only --format=just-symbols "$@" | sort -u)"
+  for s in $undef; do
+    grep -qx "$s" <<<"$defined" && continue
+    [ "$s" = _GLOBAL_OFFSET_TABLE_ ] && continue # provided by the linker (i686 PIC)
+    case " $LIBC_SYMS $LIBM_SYMS $LIBLOG_SYMS $LIBDL_SYMS " in
+      *" $s "*) ;;
+      *) missing+=("$s") ;;
+    esac
+  done
+  if [ "${#missing[@]}" -ne 0 ]; then
+    echo "[$abi] unexpected imports: ${missing[*]}" >&2
+    exit 1
+  fi
+}
+
 build_abi() {
   local abi="$1" flags ldflags obj_dir stub_dir
   flags="$(abi_flags "$abi")"
@@ -88,25 +110,7 @@ build_abi() {
     objs+=("$o")
   done
 
-  # Every import must be one we stub; anything else (stack protector,
-  # 64-bit division helpers, ...) would fail to resolve on a device.
-  local undef
-  undef="$(llvm-nm -u --format=just-symbols "${objs[@]}" | sort -u)"
-  local defined
-  defined="$(llvm-nm --defined-only --format=just-symbols "${objs[@]}" | sort -u)"
-  local missing=()
-  for s in $undef; do
-    grep -qx "$s" <<<"$defined" && continue
-    [ "$s" = _GLOBAL_OFFSET_TABLE_ ] && continue # provided by the linker (i686 PIC)
-    case " $LIBC_SYMS $LIBM_SYMS $LIBLOG_SYMS " in
-      *" $s "*) ;;
-      *) missing+=("$s") ;;
-    esac
-  done
-  if [ "${#missing[@]}" -ne 0 ]; then
-    echo "[$abi] unexpected imports: ${missing[*]}" >&2
-    exit 1
-  fi
+  check_imports "$abi" "${objs[@]}"
 
   # shellcheck disable=SC2086
   stub_lib "$stub_dir" "$flags" libc $LIBC_SYMS
@@ -114,6 +118,8 @@ build_abi() {
   stub_lib "$stub_dir" "$flags" libm $LIBM_SYMS
   # shellcheck disable=SC2086
   stub_lib "$stub_dir" "$flags" liblog $LIBLOG_SYMS
+  # shellcheck disable=SC2086
+  stub_lib "$stub_dir" "$flags" libdl $LIBDL_SYMS
 
   # shellcheck disable=SC2086
   "$CC" $flags -shared -nostdlib -fuse-ld=lld \
@@ -123,7 +129,22 @@ build_abi() {
     $ldflags -o "$OUT/$abi/libmicns.so" "${objs[@]}" \
     -L"$stub_dir" -llog -lm -lc
   llvm-strip --strip-unneeded "$OUT/$abi/libmicns.so"
-  echo "[$abi] $(stat -c %s "$OUT/$abi/libmicns.so") bytes"
+
+  # The audio HAL hook for HALs that never run software effects
+  # (src/micns_hal.c); it drives libmicns.so through the effect API.
+  local hook=("$obj_dir/micns_hal.o" "$obj_dir/builtins_arm.o")
+  # shellcheck disable=SC2086
+  "$CC" $flags "${COMMON_CFLAGS[@]}" -c "$HERE/src/micns_hal.c" -o "$obj_dir/micns_hal.o"
+  check_imports "$abi" "${hook[@]}"
+  # shellcheck disable=SC2086
+  "$CC" $flags -shared -nostdlib -fuse-ld=lld \
+    -Wl,-soname,audio.primary.micns.so -Wl,--version-script="$HERE/micns_hal.map" \
+    -Wl,--no-undefined -Wl,--gc-sections -Wl,--hash-style=both -Wl,--build-id=sha1 \
+    -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wl,-z,max-page-size=16384 \
+    $ldflags -o "$OUT/$abi/audio.primary.micns.so" "${hook[@]}" \
+    -L"$stub_dir" -llog -ldl -lc
+  llvm-strip --strip-unneeded "$OUT/$abi/audio.primary.micns.so"
+  echo "[$abi] $(stat -c %s "$OUT/$abi/libmicns.so") + $(stat -c %s "$OUT/$abi/audio.primary.micns.so") bytes"
 }
 
 cd "$HERE"

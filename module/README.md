@@ -1,11 +1,15 @@
-# Mic Boost + AI Noise Suppression (Universal) v3.2
+# Mic Boost + AI Noise Suppression (Universal) v3.3
 
 Pembaruan modul **Mic_VolBoost_Swap_A2L**. Sekarang ada noise suppression
 untuk semua jalur mikrofon — voice note, rekam suara, voice typing, telepon
 internet (WhatsApp/Telegram/Discord/Meet/Zoom), dan telepon biasa — dan
 modulnya bisa dipasang di HP apa pun.
 
-**Baru di v3.2:** suara lebih jernih (presence +4 dB, "air" 5 kHz +4 dB), lebih
+**Baru di v3.3:** **HP Qualcomm** (OPPO, Xiaomi, Samsung Snapdragon, dll.)
+sekarang juga mendapat AI noise suppression, suara deep dan EQ jernih lewat
+**HAL hook** (lihat di bawah).
+
+**v3.2:** suara lebih jernih (presence +4 dB, "air" 5 kHz +4 dB), lebih
 besar (bass +5 dB, formant -5 %) dan sedikit lebih deep (-2,5 semitone).
 
 **v3.1:** peredam tahap kedua (post-filter Wiener) agar sisa bising
@@ -42,6 +46,16 @@ ini memakai jalur yang memang dipakai sistem:
    Modul ini memicu DSP lewat konfigurasi tadi (ECNS untuk VoIP, NS untuk
    voice typing) dan menyalakan **Fluence** (peredam dual-mic) untuk
    telepon, speaker, voice typing, dan rekaman/voice note.
+   **Mulai v3.3 (HAL hook):** modul memasang pembungkus kecil
+   `audio.primary.micns.so` di depan driver audio Qualcomm. Suara mic yang
+   sudah dibersihkan DSP lalu diproses lagi oleh AI NS + suara deep + EQ
+   jernih sebelum sampai ke aplikasi (voice note, rekam, WhatsApp/Discord,
+   game). Syarat: HAL audio "klasik" (`audio.primary.<platform>.so`, ada di
+   hampir semua HP Qualcomm sampai Android 14/15). Pengaman: bila audio
+   tidak jalan atau audioserver terus restart, hook dimatikan otomatis
+   (deskripsi modul menampilkan `HAL hook: failed`). Cek di HP:
+   `logcat -s MicNS-HAL` menampilkan `capture path hooked` dan
+   `... through MicNS` saat merekam.
 4. **Telepon biasa (seluler)** selalu diproses DSP/modem. Di Qualcomm modul
    ini menyalakan Fluence; di chip lain dipakai peredam bawaan HP.
 
@@ -87,6 +101,7 @@ ulang zip yang sama dan reboot. Pengaturan dipertahankan saat update.
 | `NS_CAMCORDER` | 0 | Peredam juga saat rekam video |
 | `NS_VOIP` | 1 | AEC + NS bawaan HP untuk telepon internet |
 | `NS_VOIP_AI` | 1 | AI NS + suara deep juga di telepon internet / open mic |
+| `HAL_HOOK` | auto | HAL hook Qualcomm: auto / force / off |
 | `FLUENCE` | auto | Qualcomm Fluence: auto / force / off |
 | `FLUENCE_RECORD` | 1 | Fluence saat merekam |
 | `A2L_MIXER` | auto | Mixer Mi A2 Lite: auto / force / off |
@@ -113,6 +128,10 @@ mencoba nilai lain tanpa reboot).
   Installer memberi peringatan bila mendeteksinya.
 - Suara deep terlalu berat: `DEEP_PITCH=-1`, atau `DEEP_FORMANT=0`; tidak
   mau sama sekali: `VOICE_DEEP=0`.
+- Suara/mic mati setelah pasang v3.3 di HP Qualcomm: tunggu sekitar 1
+  menit setelah boot, hook akan mati sendiri. Bisa juga `HAL_HOOK=off`
+  lalu pasang ulang. Darurat: safe mode Magisk (tahan volume bawah saat
+  boot) menonaktifkan semua modul.
 - Lawan bicara mendengar gema / suara terputus di telepon internet:
   `NS_VOIP_AI=0`.
 - Setelah update ROM/OTA, pasang ulang modul agar patch dibuat dari file baru.

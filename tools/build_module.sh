@@ -23,7 +23,7 @@ STAGE="$WORK/stage"
 cp -a "$ROOT/module" "$STAGE"
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   mkdir -p "$STAGE/lib/$abi"
-  cp "$WORK/libs/$abi/libmicns.so" "$STAGE/lib/$abi/"
+  cp "$WORK/libs/$abi/libmicns.so" "$WORK/libs/$abi/audio.primary.micns.so" "$STAGE/lib/$abi/"
 done
 mkdir -p "$STAGE/licenses"
 cp "$ROOT/micns/third_party_licenses/"* "$STAGE/licenses/"

@@ -1,6 +1,6 @@
 id=Mic_VolBoost_Swap_A2L
 name=Mic Boost + AI Noise Suppression (Universal)
-version=v3.2
-versionCode=32
+version=v3.3
+versionCode=33
 author=pexxie
 description=Discord-style AI noise suppression (RNNoise + Wiener post-filter) and a natural deep voice for voice notes, recording, open mic and internet calls, plus the phone's own noise suppression (Qualcomm Fluence, AEC/NS). Keeps the Mi A2 Lite mic boost and L/R swap. Universal: Magisk, KernelSU, APatch.
