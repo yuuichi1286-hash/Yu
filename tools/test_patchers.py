@@ -22,10 +22,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 COMMON = os.path.join(HERE, "..", "module", "common")
 UUID_MICNS = "2470ae61-735c-41ba-9565-6923cc713c54"
 UUID_MICNS_PURE = "c6b4d85a-7071-4520-9121-828cff4f596f"
+UUID_MICNS_CALL = "d7bbe82a-9292-411e-9656-52b912ece427"
 KIND = {
     "0f8d0d2a-59e5-45fe-b6e4-248c8a799109": "aec", "bb392ec0-8d4d-11e0-a896-0002a5d5c51b": "aec",
     "1d97bb0b-9e2f-4403-9ae3-58c2554306f8": "ns", "c06c8400-8e06-11e0-9cb6-0002a5d5c51b": "ns",
-    UUID_MICNS: "ns", UUID_MICNS_PURE: "ns",
+    UUID_MICNS: "ns", UUID_MICNS_PURE: "ns", UUID_MICNS_CALL: "ns",
     "aa8130e0-66fc-11e0-bad0-0002a5d5c51b": "agc", "89f38e65-d4d2-4d64-ad0e-2b3e799ea886": "agc",
 }
 SOURCES = {"mic", "voice_uplink", "voice_downlink", "voice_call", "camcorder", "voice_recognition",
@@ -183,8 +184,9 @@ def check(sample, awks, failures):
     base_streams, base_skipped = model(orig)
     scenarios = [
         ("mic=ai;voice_recognition=ai_pure;voice_communication=aec,ns", "1", "0"),
-        ("mic=ai;voice_recognition=ai_pure;camcorder=ai_pure;voice_communication=aec,ns", "1", "1"),
-        ("mic=ns,agc;voice_recognition=ns;voice_communication=aec,ns", "0", "1"),
+        ("mic=ai;voice_recognition=ai_pure;voice_communication=aec,ns,ai_call", "1", "0"),
+        ("mic=ai;voice_recognition=ai_pure;camcorder=ai_pure;voice_communication=aec,ns,ai_call", "1", "1"),
+        ("mic=ns,agc;voice_recognition=ns;voice_communication=aec,ns,ai_call", "0", "1"),
         ("mic=ns,agc;voice_recognition=ns;voice_communication=aec,ns", "0", "0"),
         ("", "1", "1"),
     ]
@@ -221,14 +223,22 @@ def check(sample, awks, failures):
             kinds = [kind_of(e) for e in got]
             for role in roles.split(","):
                 want = "ns" if role.startswith("ai") else role
-                if role.startswith("ai") and micns_ok == "1" and "ns" not in [kind_of(e) for e in base_streams.get(src, [])]:
+                if role == "ai_call":
+                    # an extra last stage, only when MicNS can load
+                    calls = [i for i, e in enumerate(got) if e[2] == UUID_MICNS_CALL]
+                    # (a vendor block written on one line is left untouched)
+                    if micns_ok == "1" and calls != [len(got) - 1] and got != base_streams.get(src):
+                        failures.append(f"{tag}: {src} lacks micns_call as the last effect: {got}")
+                    if micns_ok == "0" and calls:
+                        failures.append(f"{tag}: {src} got micns_call without MicNS: {got}")
+                elif role.startswith("ai") and micns_ok == "1" and "ns" not in [kind_of(e) for e in base_streams.get(src, [])]:
                     uuid = UUID_MICNS if role == "ai" else UUID_MICNS_PURE
                     if not any(e[2] == uuid and e[1] and e[1].endswith("libmicns.so") for e in got):
                         failures.append(f"{tag}: {src} lacks MicNS ({role}): {got}")
                 elif want not in kinds and (aosp_ok == "1" or any(kind_of((n,) + v) == want for n, v in []) or src in base_streams):
                     # only required when the device can provide it
                     pass
-            if kinds.count("ns") > 1:
+            if [kind_of(e) for e in got if e[2] != UUID_MICNS_CALL].count("ns") > 1:
                 failures.append(f"{tag}: {src} has two noise suppressors: {got}")
         for src, entries in base_streams.items():
             if src not in streams or [e[0] for e in streams[src]][: len(entries)] != [e[0] for e in entries]:

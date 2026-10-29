@@ -21,6 +21,7 @@
 
 static const effect_uuid_t kVoice = {0x2470ae61, 0x735c, 0x41ba, 0x9565, {0x69, 0x23, 0xcc, 0x71, 0x3c, 0x54}};
 static const effect_uuid_t kPure = {0xc6b4d85a, 0x7071, 0x4520, 0x9121, {0x82, 0x8c, 0xff, 0x4f, 0x59, 0x6f}};
+static const effect_uuid_t kCall = {0xd7bbe82a, 0x9292, 0x411e, 0x9656, {0x52, 0xb9, 0x12, 0xec, 0xe4, 0x27}};
 static const effect_uuid_t kTypeNs = {0x58b4b260, 0x8e06, 0x11e0, 0xaa8e, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
 
 static const audio_effect_library_t *g_lib;
@@ -110,7 +111,7 @@ static int run(int argc, char **argv) {
     size_t samples, frames, pos = 0;
     int16_t *in = read_file(argv[8], &samples);
     int16_t *out = calloc(samples + 16, sizeof(int16_t));
-    effect_handle_t e = create(!strcmp(variant, "pure") ? &kPure : &kVoice);
+    effect_handle_t e = create(!strcmp(variant, "pure") ? &kPure : !strcmp(variant, "call") ? &kCall : &kVoice);
     unsigned fixed = 0, maxr = 0;
     FILE *f;
     (void)argc;
@@ -174,6 +175,7 @@ static void selftest_commands(void) {
     CHECK(g_lib->get_descriptor(&kVoice, &d) == 0 && !memcmp(&d.type, &kTypeNs, 16), "voice desc");
     CHECK((d.flags & 7) == EFFECT_FLAG_TYPE_PRE_PROC, "pre-proc flag");
     CHECK(g_lib->get_descriptor(&kPure, &d) == 0 && !memcmp(&d.uuid, &kPure, 16), "pure desc");
+    CHECK(g_lib->get_descriptor(&kCall, &d) == 0 && !memcmp(&d.uuid, &kCall, 16), "call desc");
     CHECK(g_lib->get_descriptor(&bogus, &d) == -EINVAL, "bogus desc");
     CHECK(g_lib->get_descriptor(NULL, &d) == -EINVAL, "null desc");
     {
@@ -272,7 +274,8 @@ static void selftest_stress(int rounds) {
     for (r = 0; r < rounds; r++) {
         uint32_t rate = rates[rnd() % (sizeof(rates) / sizeof(rates[0]))];
         int ch = 1 + (int)(rnd() % 3);
-        effect_handle_t e = create(rnd() & 1 ? &kVoice : &kPure);
+        uint32_t v = rnd() % 3;
+        effect_handle_t e = create(v == 0 ? &kVoice : v == 1 ? &kPure : &kCall);
         size_t total = rate / 2 + rnd() % rate, pos = 0;
         int16_t *buf = malloc((total + 8) * ch * sizeof(int16_t));
         size_t i;

@@ -5,12 +5,14 @@
  * suppression" that wraps the RNNoise recurrent neural network denoiser
  * (Xiph.Org). Audio HALs that run software pre-processing effects call
  * process() with 16-bit PCM at the stream rate; we resample to 48 kHz,
- * denoise in 10 ms blocks, optionally shape the voice (clarity EQ and a
- * speech leveler) and convert back.
+ * denoise in 10 ms blocks (RNNoise plus a Wiener post-filter on its
+ * gains), optionally shape the voice (clarity EQ, voice gate, speech
+ * leveler, deeper voice) and convert back.
  *
- * Two implementations share the code:
- *   micns       - high-pass + RNNoise + clarity EQ + leveler + limiter
- *   micns_pure  - high-pass + RNNoise + limiter
+ * Three implementations share the code:
+ *   micns       - high-pass + denoise + clarity EQ + gate + leveler + deep voice + limiter
+ *   micns_call  - the same without the leveler, for internet calls
+ *   micns_pure  - high-pass + denoise + limiter
  *
  * Runtime settings are read from micns.conf every time an effect is
  * created, i.e. at the start of every recording session.
@@ -30,9 +32,11 @@
 
 void rnnoise_global_init(void);
 void rnnoise_reset(DenoiseState *st);
+void rnnoise_set_postfilter(DenoiseState *st, int on, float floor_gain);
+void rnnoise_get_pitch(const DenoiseState *st, int *period, float *gain);
 
 #define MICNS_TAG "MicNS"
-#define MICNS_VERSION "1.0"
+#define MICNS_VERSION "1.1"
 
 #define MICNS_RATE 48000u
 #define MICNS_BLOCK 480        /* one RNNoise frame: 10 ms at 48 kHz */
@@ -41,6 +45,11 @@ void rnnoise_reset(DenoiseState *st);
 #define MICNS_MIN_RATE 8000u
 #define MICNS_MAX_RATE 192000u
 #define MICNS_RESAMPLE_QUALITY 5
+#define PS_LOOKAHEAD 1024  /* deep voice: input needed past a grain centre */
+#define PS_LATENCY 1664    /* deep voice: fixed delay (35 ms), > LOOKAHEAD + MAX_PERIOD */
+#define PS_HOP 240         /* deep voice: grain spacing for unvoiced sound */
+#define PS_MIN_PERIOD 96   /* 500 Hz */
+#define PS_MAX_PERIOD 600  /* 80 Hz */
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, MICNS_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, MICNS_TAG, __VA_ARGS__)
@@ -49,7 +58,11 @@ void rnnoise_reset(DenoiseState *st);
 /* Descriptors                                                               */
 /* ------------------------------------------------------------------------- */
 
-enum { VARIANT_VOICE = 0, VARIANT_PURE = 1, VARIANT_COUNT };
+/* voice: everything (recording, voice notes); pure: noise removal only
+   (speech recognition); call: for internet calls, after the platform echo
+   canceller, without the leveler since call apps run their own AGC. */
+enum { VARIANT_VOICE = 0, VARIANT_PURE = 1, VARIANT_CALL = 2, VARIANT_COUNT };
+static const char *const g_variant_names[VARIANT_COUNT] = {"voice", "pure", "call"};
 
 /* FX_IID_NS: the generic noise suppression type, so audio HALs and the
    framework treat us exactly like the platform NoiseSuppressor. */
@@ -76,6 +89,16 @@ static const effect_descriptor_t g_descriptors[VARIANT_COUNT] = {
         "MicNS AI Noise Suppression (pure)",
         "MicNS / RNNoise (Xiph.Org)",
     },
+    {
+        MICNS_TYPE_NS,
+        {0xd7bbe82a, 0x9292, 0x411e, 0x9656, {0x52, 0xb9, 0x12, 0xec, 0xe4, 0x27}},
+        EFFECT_CONTROL_API_VERSION,
+        EFFECT_FLAG_TYPE_PRE_PROC | EFFECT_FLAG_DEVICE_IND,
+        400,
+        160,
+        "MicNS AI Noise Suppression (call)",
+        "MicNS / RNNoise (Xiph.Org)",
+    },
 };
 
 /* ------------------------------------------------------------------------- */
@@ -91,6 +114,11 @@ typedef struct {
     int gain_db;   /* voice variant: fixed make-up gain */
     int gate;      /* voice variant: duck the gaps between words */
     int gate_db;   /* voice variant: how far the gaps are ducked */
+    int postfilter;     /* per-bin residual noise post-filter */
+    int deep;           /* voice variant: deeper voice */
+    float deep_pitch;   /* semitones, negative = lower */
+    float deep_formant; /* percent, negative = bigger/darker vocal tract */
+    float deep_bass;    /* dB of low shelf at 150 Hz */
 } micns_settings;
 
 static const char *const g_conf_paths[] = {
@@ -112,10 +140,22 @@ static void settings_defaults(micns_settings *s) {
     s->leveler = 1;
     s->gain_db = 0;
     s->gate = 1;
-    s->gate_db = 15;
+    s->gate_db = 18;
+    s->postfilter = 1;
+    s->deep = 0;
+    s->deep_pitch = -2.f;
+    s->deep_formant = -4.f;
+    s->deep_bass = 4.f;
 }
 
-static void settings_apply(micns_settings *s, const char *key, int value) {
+static float clampf(float v, float lo, float hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static void settings_apply(micns_settings *s, const char *key, float fvalue) {
+    int value;
+    fvalue = clampf(fvalue, -1e6f, 1e6f); /* keep the int conversion defined */
+    value = (int)(fvalue >= 0.f ? fvalue + 0.5f : fvalue - 0.5f);
     if (!strcmp(key, "enable")) s->enable = value != 0;
     else if (!strcmp(key, "strength")) s->strength = clampi(value, 0, 100);
     else if (!strcmp(key, "hpf")) s->hpf = value != 0;
@@ -124,6 +164,23 @@ static void settings_apply(micns_settings *s, const char *key, int value) {
     else if (!strcmp(key, "gain_db")) s->gain_db = clampi(value, -12, 12);
     else if (!strcmp(key, "gate")) s->gate = value != 0;
     else if (!strcmp(key, "gate_db")) s->gate_db = clampi(value, 0, 40);
+    else if (!strcmp(key, "postfilter")) s->postfilter = value != 0;
+    else if (!strcmp(key, "deep")) s->deep = value != 0;
+    else if (!strcmp(key, "deep_pitch")) s->deep_pitch = clampf(fvalue, -6.f, 6.f);
+    else if (!strcmp(key, "deep_formant")) s->deep_formant = clampf(fvalue, -15.f, 15.f);
+    else if (!strcmp(key, "deep_bass")) s->deep_bass = clampf(fvalue, 0.f, 12.f);
+}
+
+/* "-2.5" style numbers without pulling in strtod. */
+static int parse_num(const char *p, float *out) {
+    float sign = 1.f, v = 0.f, scale = 1.f;
+    int digits = 0;
+    if (*p == '-' || *p == '+') sign = *p++ == '-' ? -1.f : 1.f;
+    for (; *p >= '0' && *p <= '9'; p++, digits++) v = v * 10.f + (float)(*p - '0');
+    if (*p == '.')
+        for (p++; *p >= '0' && *p <= '9'; p++, digits++) v += (float)(*p - '0') * (scale *= 0.1f);
+    *out = sign * v;
+    return digits > 0;
 }
 
 static char *trim(char *s) {
@@ -142,8 +199,8 @@ static void settings_load(micns_settings *s) {
         FILE *f = fopen(g_conf_paths[i], "r");
         if (!f) continue;
         while (fgets(line, sizeof(line), f)) {
-            char *key, *val, *eq, *end;
-            long v;
+            char *key, *val, *eq;
+            float v;
             key = trim(line);
             if (*key == '#' || *key == 0) continue;
             eq = strchr(key, '=');
@@ -151,9 +208,8 @@ static void settings_load(micns_settings *s) {
             *eq = 0;
             key = trim(key);
             val = trim(eq + 1);
-            v = strtol(val, &end, 10);
-            if (end == val) continue;
-            settings_apply(s, key, (int)v);
+            if (!parse_num(val, &v)) continue;
+            settings_apply(s, key, v);
         }
         fclose(f);
         return;
@@ -189,6 +245,15 @@ static void biquad_peaking(biquad *f, double fs, double f0, double q, double gai
     double a = pow(10.0, gain_db / 40.0);
     double w = 2.0 * M_PI * f0 / fs, cw = cos(w), alpha = sin(w) / (2.0 * q);
     biquad_set(f, 1 + alpha * a, -2 * cw, 1 - alpha * a, 1 + alpha / a, -2 * cw, 1 - alpha / a);
+}
+
+static void biquad_lowshelf(biquad *f, double fs, double f0, double gain_db) {
+    double a = pow(10.0, gain_db / 40.0);
+    double w = 2.0 * M_PI * f0 / fs, cw = cos(w);
+    double sa = sin(w) * sqrt(a); /* shelf slope S = 1 */
+    biquad_set(f, a * ((a + 1) - (a - 1) * cw + sa), 2 * a * ((a - 1) - (a + 1) * cw),
+               a * ((a + 1) - (a - 1) * cw - sa), (a + 1) + (a - 1) * cw + sa,
+               -2 * ((a - 1) + (a + 1) * cw), (a + 1) + (a - 1) * cw - sa);
 }
 
 static void biquad_run(biquad *f, float *x, int n) {
@@ -250,8 +315,30 @@ typedef struct {
     uint32_t out_pos, out_len, out_cap;
     float dry[MICNS_BLOCK];    /* last high-passed block, aligned with RNNoise delay */
     float den[MICNS_BLOCK];
-    biquad hpf, eq_low, eq_pres;
+    biquad hpf, eq_low, eq_pres, bass;
+    struct psola *ps;          /* deep voice state, NULL when off */
+    int period;                /* pitch of the current block (48 kHz samples) */
+    float pgain;               /* how periodic (voiced) it is, 0..1 */
+    float pvad;                /* RNNoise speech probability of the block */
+    int vperiod;               /* period deep voice used last block, 0 = unvoiced */
+    int vheld;                 /* blocks vperiod was held without a pitch */
 } micns_chan;
+
+/* Deep voice state, see deep_block(). */
+#define PS_RING 8192
+#define PS_MASK (PS_RING - 1)
+#define PS_BLOCKS 16
+
+struct psola {
+    float in[PS_RING];
+    float acc[PS_RING];
+    float wsum[PS_RING];
+    int period[PS_BLOCKS];  /* per block, 0 = unvoiced */
+    uint32_t cur;           /* ring position of the newest block */
+    uint32_t nblk;
+    double ts;              /* next synthesis mark, relative to cur */
+    double ta;              /* last analysis mark, relative to cur */
+};
 
 typedef struct micns_ctx {
     const struct effect_interface_s *itfe; /* must stay first */
@@ -279,6 +366,9 @@ typedef struct micns_ctx {
     int gate_hold;       /* gate: blocks left before closing */
     int talk_run;        /* gate: consecutive talking blocks */
     float vad_prev;
+    int deep_on;
+    double deep_alpha;   /* pitch ratio, < 1 lowers */
+    float deep_beta;     /* formant ratio, < 1 lowers */
     micns_chan ch[MICNS_MAX_PROC_CH];
     float *tmp_in[MICNS_MAX_PROC_CH];
     float *tmp_out[MICNS_MAX_PROC_CH];
@@ -294,6 +384,7 @@ static void chan_free(micns_chan *c) {
     if (c->down) speex_resampler_destroy(c->down);
     free(c->in48);
     free(c->out);
+    free(c->ps);
     memset(c, 0, sizeof(*c));
 }
 
@@ -327,6 +418,14 @@ static void ctx_reset_dsp(micns_ctx *x) {
         biquad_highpass(&c->hpf, fs, 80.0, 0.7071);
         biquad_peaking(&c->eq_low, fs, 250.0, 1.0, -1.5);
         biquad_peaking(&c->eq_pres, fs, 3200.0, 0.9, 2.5);
+        biquad_lowshelf(&c->bass, fs, 150.0, x->set.deep_bass);
+        rnnoise_set_postfilter(c->rnn, x->set.postfilter, 0.3f);
+        c->period = c->vperiod = c->vheld = 0;
+        c->pgain = c->pvad = 0.f;
+        if (c->ps) {
+            memset(c->ps, 0, sizeof(*c->ps));
+            c->ps->ts = c->ps->ta = -(double)PS_LATENCY;
+        }
     }
     x->level_db = -21.f;
     x->gain_db = 0.f;
@@ -366,6 +465,10 @@ static int ctx_setup_dsp(micns_ctx *x) {
         if (!x->tmp_in[i] || !x->tmp_out[i] || !c->in48 || !c->out) return -ENOMEM;
         c->rnn = rnnoise_create(NULL);
         if (!c->rnn) return -ENOMEM;
+        if (x->deep_on) {
+            c->ps = calloc(1, sizeof(*c->ps));
+            if (!c->ps) return -ENOMEM;
+        }
         if (x->rate != MICNS_RATE) {
             c->up = speex_resampler_init(1, x->rate, MICNS_RATE, MICNS_RESAMPLE_QUALITY, &err);
             if (!c->up || err) return -ENOMEM;
@@ -385,7 +488,10 @@ static void ctx_apply_settings(micns_ctx *x) {
     x->fixed_gain = x->variant == VARIANT_VOICE ? db_to_lin((float)x->set.gain_db) : 1.f;
     /* ~60 ms limiter release at 48 kHz */
     x->lim_release = expf(-1.f / (0.060f * (float)MICNS_RATE));
-    x->gate_floor = x->variant == VARIANT_VOICE && x->set.gate ? db_to_lin(-(float)x->set.gate_db) : 1.f;
+    x->gate_floor = x->variant != VARIANT_PURE && x->set.gate ? db_to_lin(-(float)x->set.gate_db) : 1.f;
+    x->deep_on = x->variant != VARIANT_PURE && x->set.deep;
+    x->deep_alpha = exp(x->set.deep_pitch / 12.0 * 0.69314718055994531); /* 2^(st/12) */
+    x->deep_beta = 1.f + x->set.deep_formant / 100.f;
 }
 
 static int ctx_configure(micns_ctx *x, const effect_config_t *cfg) {
@@ -423,7 +529,7 @@ static int ctx_configure(micns_ctx *x, const effect_config_t *cfg) {
     }
     x->configured = 1;
     LOGI("v%s %s: %u Hz x%u, strength %d, clarity %d, leveler %d, enable %d", MICNS_VERSION,
-         x->variant == VARIANT_VOICE ? "voice" : "pure", rate, nch, x->set.strength,
+         g_variant_names[x->variant], rate, nch, x->set.strength,
          x->set.clarity, x->set.leveler, x->set.enable);
     return 0;
 }
@@ -516,6 +622,8 @@ static float denoise_block(micns_ctx *x, micns_chan *c, const float *in, float *
     }
 
     vad = rnnoise_process_frame(c->rnn, c->den, blk);
+    rnnoise_get_pitch(c->rnn, &c->period, &c->pgain);
+    c->pvad = vad;
 
     /* RNNoise output lags its input by exactly one block: mix it with the
        previous high-passed block, then remember the current one. */
@@ -527,7 +635,7 @@ static float denoise_block(micns_ctx *x, micns_chan *c, const float *in, float *
     memcpy(c->dry, blk, MICNS_BLOCK * sizeof(float));
     memcpy(blk, c->den, MICNS_BLOCK * sizeof(float));
 
-    if (x->variant == VARIANT_VOICE && x->set.clarity) {
+    if (x->variant != VARIANT_PURE && x->set.clarity) {
         biquad_run(&c->eq_low, blk, MICNS_BLOCK);
         biquad_run(&c->eq_pres, blk, MICNS_BLOCK);
     }
@@ -571,10 +679,9 @@ static float gate_block(micns_ctx *x, int talking) {
     return x->gate_gain;
 }
 
-/* Linked-channel speech leveler, gate and peak limiter on one 48 kHz block.
+/* Linked-channel speech leveler and gate on one 48 kHz block.
    vad is the activity of the block RNNoise just analysed (see is_talking). */
 static void dynamics_block(micns_ctx *x, float *blk[], uint32_t nproc, float vad) {
-    const float thr = 0.94f * 32767.f;
     const int fast = 96; /* 2 ms ramp when the gain has to go up */
     int talking = is_talking(x, vad);
     float g0 = x->gain_lin, g1;
@@ -618,11 +725,20 @@ static void dynamics_block(micns_ctx *x, float *blk[], uint32_t nproc, float vad
     ramp = g1 > g0 * 1.25f ? fast : MICNS_BLOCK;
     for (i = 0; i < MICNS_BLOCK; i++) {
         float g = i < ramp ? g0 + (g1 - g0) * (float)(i + 1) / (float)ramp : g1;
+        for (c = 0; c < nproc; c++) blk[c][i] *= g;
+    }
+    x->gain_lin = g1;
+}
+
+/* Linked-channel peak limiter, the last stage before conversion to 16 bit. */
+static void limit_block(micns_ctx *x, float *blk[], uint32_t nproc) {
+    const float thr = 0.94f * 32767.f;
+    uint32_t c;
+    int i;
+    for (i = 0; i < MICNS_BLOCK; i++) {
         float peak = 0.f, lg;
         for (c = 0; c < nproc; c++) {
-            float v = blk[c][i] * g;
-            float a = fabsf(v);
-            blk[c][i] = v;
+            float a = fabsf(blk[c][i]);
             if (a > peak) peak = a;
         }
         x->lim_env = peak > x->lim_env ? peak : x->lim_env * x->lim_release + peak * (1.f - x->lim_release);
@@ -631,7 +747,108 @@ static void dynamics_block(micns_ctx *x, float *blk[], uint32_t nproc, float vad
             for (c = 0; c < nproc; c++) blk[c][i] *= lg;
     }
     if (x->lim_env < 1e-6f) x->lim_env = 0.f;
-    x->gain_lin = g1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Deep voice: pitch-synchronous overlap-add (PSOLA)                         */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Lowers the pitch of voiced speech while keeping the formants (the shape of
+ * the vocal tract) in place, which is what makes a lower voice sound like a
+ * person rather than a slowed-down recording. RNNoise already tracks the
+ * pitch period of every block: grains two periods long are cut at
+ * period-spaced analysis marks and laid down at wider spacing. Reading the
+ * grains slightly slower than they are written also moves the formants down
+ * a few percent (a "bigger" voice). Unvoiced sound goes through plain
+ * overlap-add unchanged. The output is exactly PS_LATENCY samples late.
+ */
+static int psola_period(const struct psola *ps, double t) {
+    int off = (int)floor(t / MICNS_BLOCK);
+    if (off > 0) off = 0;
+    if (off < -(PS_BLOCKS - 1)) off = -(PS_BLOCKS - 1);
+    return ps->period[(ps->nblk + (uint32_t)off) & (PS_BLOCKS - 1)];
+}
+
+/* Hann-windowed grain read around `src` (stepping by beta) and added around
+   output position `center`; window sums are kept for normalisation. */
+static void psola_grain(struct psola *ps, int center, double src, int half, float beta) {
+    double step = M_PI / (double)(half + 1);
+    double cr = cos(-half * step), ci = sin(-half * step);
+    double sr = cos(step), si = sin(step);
+    int k;
+    for (k = -half; k <= half; k++) {
+        double sp = src + k * (double)beta;
+        double fl = floor(sp);
+        int i0 = (int)fl;
+        float fr = (float)(sp - fl);
+        float a = ps->in[(ps->cur + (uint32_t)i0) & PS_MASK];
+        float b = ps->in[(ps->cur + (uint32_t)(i0 + 1)) & PS_MASK];
+        float w = 0.5f * (1.f + (float)cr);
+        uint32_t o = (ps->cur + (uint32_t)(center + k)) & PS_MASK;
+        double t;
+        ps->acc[o] += w * (a + fr * (b - a));
+        ps->wsum[o] += w;
+        t = cr * sr - ci * si; /* rotate to the next window angle */
+        ci = cr * si + ci * sr;
+        cr = t;
+    }
+}
+
+/* Voicing with hysteresis: a block that drops out of a vowel for a moment
+   would otherwise snap back to the original pitch and make it warble. */
+static int deep_voicing(micns_chan *c) {
+    int p = c->period, prev = c->vperiod;
+    int in_range = p >= PS_MIN_PERIOD && p <= PS_MAX_PERIOD;
+    int cur = 0;
+    if (in_range && c->pgain > 0.45f) {
+        cur = p; /* clearly voiced */
+    } else if (prev && in_range && c->pgain > 0.2f && (p > prev ? p - prev : prev - p) * 5 < prev) {
+        cur = p; /* weaker, but continues the same pitch */
+    } else if (prev && c->vheld < 2 && c->pvad > 0.5f) {
+        c->vheld++; /* no usable estimate while still talking: hold 20 ms */
+        return c->vperiod;
+    }
+    c->vheld = 0;
+    c->vperiod = cur;
+    return cur;
+}
+
+static void deep_block(micns_ctx *x, micns_chan *c, float *blk) {
+    struct psola *ps = c->ps;
+    int i;
+
+    if (ps && (x->deep_alpha != 1.0 || x->deep_beta != 1.f)) {
+        ps->cur += MICNS_BLOCK;
+        ps->nblk++;
+        ps->ts -= MICNS_BLOCK;
+        ps->ta -= MICNS_BLOCK;
+        for (i = 0; i < MICNS_BLOCK; i++) ps->in[(ps->cur + (uint32_t)i) & PS_MASK] = blk[i];
+        ps->period[ps->nblk & (PS_BLOCKS - 1)] = deep_voicing(c);
+
+        /* Place every grain whose source is fully available. */
+        while (ps->ts <= MICNS_BLOCK - PS_LOOKAHEAD) {
+            int per = psola_period(ps, ps->ts);
+            double pa = per ? per : PS_HOP;
+            if (per) {
+                /* nearest analysis mark on the pitch-period grid */
+                double m = floor((ps->ts - ps->ta) / pa + 0.5);
+                ps->ta += (m > 0 ? m : 0) * pa;
+            } else {
+                ps->ta = ps->ts;
+            }
+            psola_grain(ps, (int)floor(ps->ts + 0.5), ps->ta, (int)pa, x->deep_beta);
+            ps->ts += per ? pa / x->deep_alpha : PS_HOP;
+        }
+        /* Everything PS_LATENCY behind the newest block is complete. */
+        for (i = 0; i < MICNS_BLOCK; i++) {
+            uint32_t o = (ps->cur - PS_LATENCY + (uint32_t)i) & PS_MASK;
+            float w = ps->wsum[o];
+            blk[i] = ps->acc[o] / (w > 0.3f ? w : 0.3f);
+            ps->acc[o] = ps->wsum[o] = 0.f;
+        }
+    }
+    biquad_run(&c->bass, blk, MICNS_BLOCK);
 }
 
 static void run_blocks(micns_ctx *x) {
@@ -655,6 +872,9 @@ static void run_blocks(micns_ctx *x) {
             if (v > vad) vad = v;
         }
         dynamics_block(x, blk, x->nproc, vad);
+        if (x->deep_on)
+            for (c = 0; c < x->nproc; c++) deep_block(x, &x->ch[c], blk[c]);
+        limit_block(x, blk, x->nproc);
         for (c = 0; c < x->nproc; c++) push_output(x, &x->ch[c], blk[c]);
     }
 }

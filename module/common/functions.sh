@@ -142,13 +142,15 @@ update_description() {
   _ai=off
   _c=$(micns_conf_in "$1") && grep -q '^enable=1' "$_c" && _ai=on
   [ -z "$_c" ] && _ai="n/a"
+  _dp=off
+  [ -n "$_c" ] && grep -q '^deep=1' "$_c" && _dp=on
   _n=0
   for _f in $(effect_configs); do grep -q 'micns:' "$_f" 2>/dev/null && _n=$((_n + 1)); done
   _fl=$(getprop persist.vendor.audio.fluence.voicecall)
   [ -z "$_fl" ] && _fl=$(getprop persist.audio.fluence.voicecall)
   case "$_fl" in true) _fl=on ;; "") _fl="n/a" ;; *) _fl=off ;; esac
   _d=$(sed -n 's/^description=//p' "$_mp" | sed 's/^\[[^]]*\] *//')
-  _new=$(awk -v d="description=[AI NS: $_ai | NS configs: $_n | Fluence: $_fl] $_d" \
+  _new=$(awk -v d="description=[AI NS: $_ai | Deep: $_dp | NS configs: $_n | Fluence: $_fl] $_d" \
     '/^description=/ { print d; next } { print }' "$_mp")
   printf '%s\n' "$_new" > "$_mp"
 }

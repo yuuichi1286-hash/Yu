@@ -7,8 +7,8 @@ COMMON=$MODPATH/common
 REPORT=$MODPATH/micns_report.txt
 
 ui_print "*******************************************"
-ui_print "  Mic Boost + AI Noise Suppression  v3.0   "
-ui_print "  RNNoise AI NS - Fluence - AEC/NS - Mi A2L "
+ui_print "  Mic Boost + AI Noise Suppression  v3.1   "
+ui_print "  AI NS - Deep Voice - Fluence - AEC - A2L  "
 ui_print "*******************************************"
 
 unzip -o "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" >&2 || abort "! Unable to extract the module"
@@ -77,12 +77,17 @@ if [ $MICNS = 1 ]; then
 # needed). Generated from settings.conf; the Action button toggles enable.
 enable=1
 strength=$(setting NS_STRENGTH 90)
+postfilter=$(setting NS_POSTFILTER 1)
 hpf=$(setting VOICE_LOWCUT 1)
 clarity=$(setting VOICE_CLARITY 1)
 leveler=$(setting VOICE_LEVELER 1)
 gain_db=$(setting VOICE_GAIN_DB 0)
 gate=$(setting VOICE_GATE 1)
-gate_db=$(setting VOICE_GATE_DB 15)
+gate_db=$(setting VOICE_GATE_DB 18)
+deep=$(setting VOICE_DEEP 1)
+deep_pitch=$(setting DEEP_PITCH -2)
+deep_formant=$(setting DEEP_FORMANT -4)
+deep_bass=$(setting DEEP_BASS 4)
 EOF
 fi
 
@@ -97,7 +102,12 @@ else
   PLAN="$PLAN;voice_recognition=ns"
   [ "$(setting NS_CAMCORDER 0)" = 1 ] && PLAN="$PLAN;camcorder=ns"
 fi
-[ "$(setting NS_VOIP 1)" = 1 ] && PLAN="$PLAN;voice_communication=aec,ns"
+# Internet calls: the platform echo canceller + NS, then MicNS on top
+# (micns_call, last in the chain so it never sees the echo).
+VC=""
+[ "$(setting NS_VOIP 1)" = 1 ] && VC="aec,ns"
+[ $MICNS = 1 ] && [ "$(setting NS_VOIP_AI 1)" = 1 ] && VC="${VC:+$VC,}ai_call"
+[ -n "$VC" ] && PLAN="$PLAN;voice_communication=$VC"
 
 AOSP_OK=0
 AOSP_PATH=$(soundfx_lib libaudiopreprocessing.so) && AOSP_OK=1

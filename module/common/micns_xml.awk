@@ -10,7 +10,9 @@
 #   inline mode: "<!--micns:I-->...<!--/micns:I-->" inside a line
 #
 # Variables (-v):
-#   plan      "source=role,role;source=role" with roles ai, ai_pure, ns, aec, agc
+#   plan      "source=role,role;source=role" with roles ai, ai_pure, ai_call,
+#             ns, aec, agc (ai_call: micns_call appended after the other
+#             effects, only when micns_ok)
 #   micns_ok  1 if libmicns.so is installed and loadable for this file
 #   aosp_ok   1 if the AOSP pre-processing library exists on the device
 #   aosp_file its file name (default libaudiopreprocessing.so; the AIDL
@@ -26,6 +28,7 @@ BEGIN {
     pending = ""
     UUID_MICNS = "2470ae61-735c-41ba-9565-6923cc713c54"
     UUID_MICNS_PURE = "c6b4d85a-7071-4520-9121-828cff4f596f"
+    UUID_MICNS_CALL = "d7bbe82a-9292-411e-9656-52b912ece427"
     # implementation (and type) UUIDs of known pre-processing effects
     kind["0f8d0d2a-59e5-45fe-b6e4-248c8a799109"] = "aec"   # Qualcomm
     kind["bb392ec0-8d4d-11e0-a896-0002a5d5c51b"] = "aec"   # AOSP WebRTC
@@ -35,6 +38,7 @@ BEGIN {
     kind["58b4b260-8e06-11e0-aa8e-0002a5d5c51b"] = "ns"    # type
     kind[UUID_MICNS] = "ns"
     kind[UUID_MICNS_PURE] = "ns"
+    kind[UUID_MICNS_CALL] = "ns"
     kind["aa8130e0-66fc-11e0-bad0-0002a5d5c51b"] = "agc"   # AOSP WebRTC
     kind["89f38e65-d4d2-4d64-ad0e-2b3e799ea886"] = "agc"   # AOSP AGC2
     kind["0a8abfe0-654c-11e0-ba26-0002a5d5c51b"] = "agc"   # type
@@ -205,7 +209,7 @@ END {
         t = effect_kind(e)
         if (t == "" || (t in sys_eff)) continue
         u = tolower(eff_uuid[e])
-        if (u == UUID_MICNS || u == UUID_MICNS_PURE) continue
+        if (u == UUID_MICNS || u == UUID_MICNS_PURE || u == UUID_MICNS_CALL) continue
         sys_eff[t] = e
     }
     for (e in lib_path) if (lib_path[e] ~ /(^|\/)libmicns\.so$/) micns_lib = e
@@ -218,6 +222,7 @@ END {
         u = tolower(eff_uuid[eff_order[k]])
         if (u == UUID_MICNS) micns_eff = eff_order[k]
         if (u == UUID_MICNS_PURE) micns_pure_eff = eff_order[k]
+        if (u == UUID_MICNS_CALL) micns_call_eff = eff_order[k]
     }
 
     nsrc = split(plan, items, ";")
@@ -234,17 +239,33 @@ END {
         split("", have)
         if (sidx) {
             na = split(s_apply[sidx], ap, ",")
-            for (k = 1; k <= na; k++) if (ap[k] != "") { t = effect_kind(ap[k]); if (t != "") have[t] = 1 }
+            for (k = 1; k <= na; k++) if (ap[k] != "") {
+                t = effect_kind(ap[k])
+                if (t != "") have[t] = 1
+                if (tolower(eff_uuid[ap[k]]) == UUID_MICNS_CALL) have["call"] = 1
+            }
         }
         adds = ""
         missing = 0
         for (k = 1; k <= nroles; k++) {
             role = roles[k]
             if (role == "") continue
-            want_kind = (role == "ai" || role == "ai_pure") ? "ns" : role
+            want_kind = (role == "ai" || role == "ai_pure") ? "ns" : role == "ai_call" ? "call" : role
             if (want_kind in have) continue
             nm = ""
-            if ((role == "ai" || role == "ai_pure") && micns_ok) {
+            if (role == "ai_call") {
+                # an extra stage on top of the platform effects, never replaced
+                if (!micns_ok) continue
+                if (micns_lib == "") {
+                    micns_lib = unique_lib("micns")
+                    new_libs = new_libs "\001<library name=\"" micns_lib "\" path=\"libmicns.so\"/>"
+                }
+                if (micns_call_eff == "") {
+                    micns_call_eff = unique_name("micns_call")
+                    new_effs = new_effs "\001<effect name=\"" micns_call_eff "\" library=\"" micns_lib "\" uuid=\"" UUID_MICNS_CALL "\"/>"
+                }
+                nm = micns_call_eff
+            } else if ((role == "ai" || role == "ai_pure") && micns_ok) {
                 if (micns_lib == "") {
                     micns_lib = unique_lib("micns")
                     new_libs = new_libs "\001<library name=\"" micns_lib "\" path=\"libmicns.so\"/>"

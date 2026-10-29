@@ -2,9 +2,10 @@
 
 Update of the **Mic_VolBoost_Swap_A2L** Magisk module (Mi A2 Lite mic boost
 and L/R stereo swap) that adds Discord-style noise suppression to every
-microphone path on any Android device.
+microphone path on any Android device, plus an optional natural "deep
+voice" (pitch-shifted speech with preserved formants and a bass shelf).
 
-- Flashable zip: [`release/Mic_VolBoost_Swap_A2L-v3.0.zip`](release/Mic_VolBoost_Swap_A2L-v3.0.zip)
+- Flashable zip: [`release/Mic_VolBoost_Swap_A2L-v3.1.zip`](release/Mic_VolBoost_Swap_A2L-v3.1.zip)
 - User guide (Bahasa Indonesia): [`module/README.md`](module/README.md)
 
 ## Layout
@@ -26,9 +27,12 @@ microphone path on any Android device.
    attaches a noise suppressor to the `mic`, `voice_recognition` and
    `voice_communication` capture sources for every app.
 2. On HALs that run software pre-processing effects (MediaTek, Unisoc, ...)
-   that suppressor is `libmicns.so` (RNNoise at 48 kHz with resampling,
-   high-pass, voice gate, clarity EQ, leveler and limiter). VoIP gets the
-   device's AEC + NS.
+   that suppressor is `libmicns.so` (RNNoise at 48 kHz with resampling and
+   a decision-directed Wiener post-filter on its gains, high-pass, voice
+   gate, clarity EQ, leveler, PSOLA deep voice driven by RNNoise's pitch
+   tracker, and limiter). VoIP gets the device's AEC + NS followed by
+   `micns_call` (the same chain without the leveler), last in the chain so
+   it only ever sees echo-cancelled audio.
 3. Qualcomm HALs hand capture-side noise suppression to the DSP: the same
    config entries switch on its ECNS/NS devices, and the installer enables
    Fluence (multi-mic NS) for calls, speakerphone, voice typing and

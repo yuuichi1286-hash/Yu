@@ -3,11 +3,13 @@
 
   audio_test.py fifo   HARNESS LIB [RUNNER...]   bit-exact latency/FIFO checks
   audio_test.py denoise HARNESS LIB CLEAN.wav NOISE.wav... [--rates ...]
+  audio_test.py deep   HARNESS LIB SPEECH.wav...   deep voice pitch checks
 
 FIFO checks write /vendor/etc/micns.conf (strength=0, hpf=0) so the effect
 reduces to "output = input delayed"; any FIFO underrun or slicing bug then
 shows up as a sample mismatch. Denoise checks mix clean speech with noise
-and report noise reduction plus speech SI-SDR before/after.
+and report noise reduction plus speech SI-SDR before/after. Deep voice
+checks compare the pitch of the voice variant with deep=1 against deep=0.
 """
 import os
 import subprocess
@@ -184,6 +186,49 @@ def denoise_tests(harness, lib, runner, clean_path, noise_paths, rates, snr_db=5
     return results
 
 
+def f0_track(y, fs=48000, fl=1920, hop=480):
+    """Pitch per 10 ms (0 = unvoiced) by normalised autocorrelation, 80-500 Hz."""
+    out = []
+    for s in range(0, len(y) - fl - 600, hop):
+        a = y[s:s + fl] - np.mean(y[s:s + fl])
+        e0 = np.dot(a, a)
+        if e0 < 1e3 * fl:
+            out.append(0.0)
+            continue
+        c = [np.dot(a, y[s + l:s + l + fl]) / np.sqrt(e0 * np.dot(y[s + l:s + l + fl], y[s + l:s + l + fl]) + 1e-9)
+             for l in range(96, 601)]
+        k = int(np.argmax(c))
+        out.append(fs / (96 + k) if c[k] > 0.75 else 0.0)
+    return np.array(out)
+
+
+def deep_tests(harness, lib, runner, clips, semitones=-2.0, latency=1664):
+    """deep=1 must lower the pitch by `semitones` and keep the level."""
+    want = 2 ** (semitones / 12)
+    fails = 0
+    for path in clips:
+        fs, s = read_wav(path)
+        x = resample(s, fs, 48000)
+        x = np.concatenate([np.zeros(24000), x * 12000 / np.max(np.abs(x)), np.zeros(24000)])
+        ys = []
+        for deep in (0, 1):
+            write_conf("gate=0\nleveler=0\ndeep=%d\ndeep_pitch=%g\n" % (deep, semitones))
+            ys.append(run(runner, harness, lib, "voice", 48000, 1, "fixed:480", "sep", x))
+        os.remove(CONF)
+        y0, y1 = ys[0], ys[1][latency:]
+        n = min(len(y0), len(y1))
+        y0, y1 = y0[:n], y1[:n]
+        f0a, f0b = f0_track(y0), f0_track(y1)
+        both = (f0a > 0) & (f0b > 0)
+        ratio = float(np.median(f0b[both] / f0a[both])) if both.any() else 0.0
+        level = 10 * np.log10(np.mean(y1 ** 2) / np.mean(y0 ** 2))
+        ok = abs(ratio - want) < 0.015 and both.sum() >= 0.6 * np.sum(f0a > 0) and abs(level) < 3
+        fails += not ok
+        print(f"  {os.path.basename(path):22s} f0 {np.median(f0a[f0a > 0]):5.1f} Hz  ratio {ratio:.3f} "
+              f"(want {want:.3f})  voiced {both.sum()}/{np.sum(f0a > 0)}  level {level:+.1f} dB  {'ok' if ok else 'FAIL'}")
+    return fails
+
+
 def main():
     mode, harness, lib = sys.argv[1], sys.argv[2], sys.argv[3]
     rest = sys.argv[4:]
@@ -195,6 +240,10 @@ def main():
     if mode == "fifo":
         fails = fifo_tests(harness, lib, runner)
         print(f"fifo: {fails} failure(s)")
+        sys.exit(1 if fails else 0)
+    if mode == "deep":
+        fails = deep_tests(harness, lib, runner, rest)
+        print(f"deep: {fails} failure(s)")
         sys.exit(1 if fails else 0)
     rates = [16000, 48000]
     if "--rates" in rest:

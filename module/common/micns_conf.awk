@@ -14,6 +14,7 @@ BEGIN {
     RS = "\001"
     UUID_MICNS = "2470ae61-735c-41ba-9565-6923cc713c54"
     UUID_MICNS_PURE = "c6b4d85a-7071-4520-9121-828cff4f596f"
+    UUID_MICNS_CALL = "d7bbe82a-9292-411e-9656-52b912ece427"
     kind["0f8d0d2a-59e5-45fe-b6e4-248c8a799109"] = "aec"
     kind["bb392ec0-8d4d-11e0-a896-0002a5d5c51b"] = "aec"
     kind["7b491460-8d4d-11e0-bd61-0002a5d5c51b"] = "aec"
@@ -22,6 +23,7 @@ BEGIN {
     kind["58b4b260-8e06-11e0-aa8e-0002a5d5c51b"] = "ns"
     kind[UUID_MICNS] = "ns"
     kind[UUID_MICNS_PURE] = "ns"
+    kind[UUID_MICNS_CALL] = "ns"
     kind["aa8130e0-66fc-11e0-bad0-0002a5d5c51b"] = "agc"
     kind["89f38e65-d4d2-4d64-ad0e-2b3e799ea886"] = "agc"
     kind["0a8abfe0-654c-11e0-ba26-0002a5d5c51b"] = "agc"
@@ -127,7 +129,8 @@ END {
         u = tolower(eff_uuid[e])
         if (u == UUID_MICNS) micns_eff = e
         if (u == UUID_MICNS_PURE) micns_pure_eff = e
-        if (t == "" || (t in sys_eff) || u == UUID_MICNS || u == UUID_MICNS_PURE) continue
+        if (u == UUID_MICNS_CALL) micns_call_eff = e
+        if (t == "" || (t in sys_eff) || u == UUID_MICNS || u == UUID_MICNS_PURE || u == UUID_MICNS_CALL) continue
         sys_eff[t] = e
     }
     for (e in lib_path) {
@@ -146,17 +149,35 @@ END {
         split("", have)
         if (src in src_seen) {
             na = split(src_apply[src], ap, " ")
-            for (k = 1; k <= na; k++) if (ap[k] != "") { t = effect_kind(ap[k]); if (t != "") have[t] = 1 }
+            for (k = 1; k <= na; k++) if (ap[k] != "") {
+                t = effect_kind(ap[k])
+                if (t != "") have[t] = 1
+                if (tolower(eff_uuid[ap[k]]) == UUID_MICNS_CALL) have["call"] = 1
+            }
         }
         adds = ""
         missing = 0
         for (k = 1; k <= nroles; k++) {
             role = roles[k]
             if (role == "") continue
-            want_kind = (role == "ai" || role == "ai_pure") ? "ns" : role
+            want_kind = (role == "ai" || role == "ai_pure") ? "ns" : role == "ai_call" ? "call" : role
             if (want_kind in have) continue
             nm = ""
-            if ((role == "ai" || role == "ai_pure") && micns_ok) {
+            if (role == "ai_call") {
+                # an extra stage on top of the platform effects, never replaced
+                if (!micns_ok) continue
+                if (micns_lib == "") {
+                    micns_lib = unique("micns", taken_libs)
+                    taken_libs = taken_libs micns_lib " "
+                    new_libs = new_libs "\001" micns_lib " {\001\002path " micns_path "\001}"
+                }
+                if (micns_call_eff == "") {
+                    micns_call_eff = unique("micns_call", taken_effs)
+                    taken_effs = taken_effs micns_call_eff " "
+                    new_effs = new_effs "\001" micns_call_eff " {\001\002library " micns_lib "\001\002uuid " UUID_MICNS_CALL "\001}"
+                }
+                nm = micns_call_eff
+            } else if ((role == "ai" || role == "ai_pure") && micns_ok) {
                 if (micns_lib == "") {
                     micns_lib = unique("micns", taken_libs)
                     taken_libs = taken_libs micns_lib " "

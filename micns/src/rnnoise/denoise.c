@@ -95,6 +95,13 @@ struct DenoiseState {
   float mem_hp_x[2];
   float lastg[NB_BANDS];
   RNNState rnn;
+  /* MicNS: per-bin residual noise post-filter */
+  int pf_on;
+  float pf_floor;
+  int pf_frames;
+  float pf_noise[FREQ_SIZE];
+  float pf_gain[FREQ_SIZE];
+  float pf_post[FREQ_SIZE];
 };
 
 static void compute_band_energy(float *bandE, const kiss_fft_cpx *X) {
@@ -477,6 +484,47 @@ static void pitch_filter(kiss_fft_cpx *X, const kiss_fft_cpx *P, const float *Ex
   }
 }
 
+/* MicNS: RNNoise's 22 band gains leave the noise sitting between voice
+   harmonics untouched while someone talks. This Wiener post-filter works
+   per FFT bin on what the bands let through: the noise spectrum is learnt
+   while nobody talks (and tracked downwards otherwise), and a
+   decision-directed SNR estimate keeps it free of musical noise. */
+static void postfilter(DenoiseState *st, const kiss_fft_cpx *X, float *gf, float vad) {
+  int i;
+  int learn = vad < .25f || st->pf_frames < 20;
+  for (i=0;i<FREQ_SIZE;i++) {
+    float p = X[i].r*X[i].r + X[i].i*X[i].i;
+    float n = st->pf_noise[i];
+    float g2, post, xi, w;
+    if (st->pf_frames == 0) n = p;
+    else if (learn) n = .85f*n + .15f*p;
+    else if (p < n) n = .9f*n + .1f*p;
+    else n *= 1.001f;
+    st->pf_noise[i] = n;
+    g2 = gf[i]*gf[i];
+    post = g2*p/(g2*n + 1e-2f);
+    xi = .96f*st->pf_gain[i]*st->pf_gain[i]*st->pf_post[i] + .04f*MAX16(post - 1.f, 0.f);
+    w = xi/(1.f + xi);
+    if (w < st->pf_floor) w = st->pf_floor;
+    st->pf_gain[i] = w;
+    st->pf_post[i] = MIN16(post, 1e4f);
+    gf[i] *= w;
+  }
+  st->pf_frames++;
+}
+
+void rnnoise_set_postfilter(DenoiseState *st, int on, float floor_gain) {
+  st->pf_on = on;
+  st->pf_floor = floor_gain;
+}
+
+/* MicNS: pitch period (48 kHz samples) and pitch correlation found for the
+   last frame, for pitch-synchronous voice effects. */
+void rnnoise_get_pitch(const DenoiseState *st, int *period, float *gain) {
+  *period = st->last_period;
+  *gain = st->last_gain;
+}
+
 float rnnoise_process_frame(DenoiseState *st, float *out, const float *in) {
   int i;
   kiss_fft_cpx X[FREQ_SIZE];
@@ -503,6 +551,7 @@ float rnnoise_process_frame(DenoiseState *st, float *out, const float *in) {
       st->lastg[i] = g[i];
     }
     interp_band_gain(gf, g);
+    if (st->pf_on) postfilter(st, X, gf, vad_prob);
 #if 1
     for (i=0;i<FREQ_SIZE;i++) {
       X[i].r *= gf[i];

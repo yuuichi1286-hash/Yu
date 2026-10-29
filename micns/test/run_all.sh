@@ -42,5 +42,8 @@ for abi in x86_64 x86 arm64-v8a armeabi-v7a; do
       "$AUDIO/ms_noise_CopyMachine_1.wav" "$AUDIO/ms_noise_Typing_1.wav" "$AUDIO/ms_noise_Babble_1.wav" \
       --rates 16000,48000 --variant "$variant" --runner "$runner"
   done
+  echo "== $abi: deep voice"
+  LD_LIBRARY_PATH="$T/$abi" python3 "$HERE/audio_test.py" deep "$T/$abi/harness" "$lib" \
+    "$AUDIO/ms_clean_clnsp2.wav" "$AUDIO/ms_clean_clnsp4.wav" --runner "$runner"
 done
 echo "ALL TESTS PASSED"
