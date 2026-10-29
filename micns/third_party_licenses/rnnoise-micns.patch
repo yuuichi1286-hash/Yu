@@ -1,0 +1,44 @@
+--- /tmp/claude-0/-home-user-Yu/5ba9a36e-1778-5394-b2eb-fd0c5d116440/scratchpad/denoise.orig.c	2026-10-29 04:15:56.809905221 +0000
++++ denoise.c	2026-10-29 04:18:32.760875971 +0000
+@@ -163,7 +163,7 @@
+ }
+ 
+ 
+-CommonState common;
++static CommonState common;
+ 
+ static void check_init() {
+   int i;
+@@ -276,10 +276,32 @@
+ DenoiseState *rnnoise_create(RNNModel *model) {
+   DenoiseState *st;
+   st = malloc(rnnoise_get_size());
++  if (!st) return NULL;
+   rnnoise_init(st, model);
++  if (!st->rnn.vad_gru_state || !st->rnn.noise_gru_state || !st->rnn.denoise_gru_state) {
++    rnnoise_destroy(st);
++    return NULL;
++  }
+   return st;
+ }
+ 
++/* MicNS: build the shared FFT/window/DCT tables up front so that the
++   lazy check_init() never runs concurrently from two capture threads. */
++void rnnoise_global_init(void) {
++  check_init();
++}
++
++/* MicNS: return a state to its freshly created condition without
++   touching the allocator (usable while a capture stream restarts). */
++void rnnoise_reset(DenoiseState *st) {
++  RNNState rnn = st->rnn;
++  memset(st, 0, sizeof(*st));
++  st->rnn = rnn;
++  RNN_CLEAR(st->rnn.vad_gru_state, st->rnn.model->vad_gru_size);
++  RNN_CLEAR(st->rnn.noise_gru_state, st->rnn.model->noise_gru_size);
++  RNN_CLEAR(st->rnn.denoise_gru_state, st->rnn.model->denoise_gru_size);
++}
++
+ void rnnoise_destroy(DenoiseState *st) {
+   free(st->rnn.vad_gru_state);
+   free(st->rnn.noise_gru_state);

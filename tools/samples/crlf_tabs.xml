@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!-- vendor <magic> config -->
+<audio_effects_conf version="2.0">
+	<libraries>
+		<library name="micns" path="libsomethingelse.so"/>
+		<library name="qcom" path="libqcomvoiceprocessing.so"/>
+	</libraries>
+	<effects>
+		<effect name="micns" library="micns" uuid="11111111-2222-3333-4444-555555555555"/>
+		<effect name="ns" library="qcom" uuid="1d97bb0b-9e2f-4403-9ae3-58c2554306f8"/>
+	</effects>
+</audio_effects_conf>
