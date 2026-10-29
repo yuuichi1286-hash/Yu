@@ -1,11 +1,14 @@
-# Mic Boost + AI Noise Suppression (Universal) v3.1
+# Mic Boost + AI Noise Suppression (Universal) v3.2
 
 Pembaruan modul **Mic_VolBoost_Swap_A2L**. Sekarang ada noise suppression
 untuk semua jalur mikrofon — voice note, rekam suara, voice typing, telepon
 internet (WhatsApp/Telegram/Discord/Meet/Zoom), dan telepon biasa — dan
 modulnya bisa dipasang di HP apa pun.
 
-**Baru di v3.1:** peredam tahap kedua (post-filter Wiener) agar sisa bising
+**Baru di v3.2:** suara lebih jernih (presence +4 dB, "air" 5 kHz +4 dB), lebih
+besar (bass +5 dB, formant -5 %) dan sedikit lebih deep (-2,5 semitone).
+
+**v3.1:** peredam tahap kedua (post-filter Wiener) agar sisa bising
 makin bersih, AI noise suppression juga di telepon internet / open mic, dan
 **suara bass/deep yang natural** saat bicara.
 
@@ -16,8 +19,8 @@ makin bersih, AI noise suppression juga di telepon internet / open mic, dan
 | **AI noise suppression (RNNoise)** | Peredam bising berbasis jaringan saraf (mirip Krisp/Discord) untuk sumber `mic` (voice note, perekam), `voice_recognition` (voice typing, asisten) dan `voice_communication` (telepon internet, open mic). |
 | **Post-filter Wiener** | Tahap kedua setelah AI: sisa bising (kipas, keyboard, mesin) ditekan lagi 2–10 dB tanpa membuat suara cempreng. |
 | **Voice gate** | Jeda saat tidak bicara dibuat senyap (-18 dB), seperti "voice activity" Discord. |
-| **Suara deep natural** | Nada turun 2 semitone dengan formant dijaga (bukan efek robot/slow motion), formant turun tipis 4 % dan bass 150 Hz +4 dB: suara lebih berat dan berisi. Bisa diatur atau dimatikan. |
-| **Suara lebih jelas** | Low-cut 80 Hz, EQ presence 3 kHz, dan leveler otomatis yang mengangkat suara pelan (maks +12 dB) plus limiter anti-pecah. |
+| **Suara deep natural** | Nada turun 2,5 semitone dengan formant dijaga (bukan efek robot/slow motion), formant turun tipis 5 % dan bass 150 Hz +5 dB: suara lebih berat dan berisi. Bisa diatur atau dimatikan. |
+| **Suara lebih jelas** | Low-cut 80 Hz, EQ presence 3 kHz +4 dB, "air" 5 kHz +4 dB, dan leveler otomatis yang mengangkat suara pelan (maks +12 dB) plus limiter anti-pecah. |
 | **Telepon internet / open mic** | Peredam gema (AEC) + NS bawaan HP, lalu AI noise suppression + suara deep di belakangnya (WhatsApp, Telegram, Discord, game, Meet, Zoom). |
 | **Qualcomm Fluence** | Peredam bising multi-mic di DSP untuk telepon biasa, speakerphone, voice typing, dan rekaman. |
 | **Mi A2 Lite** | Mixer lama tetap dipasang (mic volume boost + tukar mic kiri/kanan stereo), hanya di Mi A2 Lite. |
@@ -78,9 +81,9 @@ ulang zip yang sama dan reboot. Pengaturan dipertahankan saat update.
 | `VOICE_LEVELER` | 1 | Penyeimbang volume otomatis |
 | `VOICE_GAIN_DB` | 0 | Gain tetap -12..12 dB |
 | `VOICE_DEEP` | 1 | Suara bass/deep natural |
-| `DEEP_PITCH` | -2 | Nada (semitone): -1 halus, -2 natural, -3 berat, -6..6 |
-| `DEEP_FORMANT` | -4 | Formant (%): -4 lebih "besar", 0 asli, -15..15 |
-| `DEEP_BASS` | 4 | Bass 150 Hz (dB), 0–12 |
+| `DEEP_PITCH` | -2.5 | Nada (semitone): -1 halus, -2.5 natural, -3 berat, -6..6 |
+| `DEEP_FORMANT` | -5 | Formant (%): -5 lebih "besar", 0 asli, -15..15 |
+| `DEEP_BASS` | 5 | Bass 150 Hz (dB), 0–12 |
 | `NS_CAMCORDER` | 0 | Peredam juga saat rekam video |
 | `NS_VOIP` | 1 | AEC + NS bawaan HP untuk telepon internet |
 | `NS_VOIP_AI` | 1 | AI NS + suara deep juga di telepon internet / open mic |

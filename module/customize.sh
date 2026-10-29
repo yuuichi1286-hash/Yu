@@ -7,7 +7,7 @@ COMMON=$MODPATH/common
 REPORT=$MODPATH/micns_report.txt
 
 ui_print "*******************************************"
-ui_print "  Mic Boost + AI Noise Suppression  v3.1   "
+ui_print "  Mic Boost + AI Noise Suppression  v3.2   "
 ui_print "  AI NS - Deep Voice - Fluence - AEC - A2L  "
 ui_print "*******************************************"
 
@@ -26,6 +26,8 @@ if [ -f "$OLD" ]; then
   for key in $(sed -n 's/^\([A-Z0-9_]*\)=.*/\1/p' "$TMPDIR/settings.default"); do
     grep -q "^$key=" "$SETTINGS" || grep "^$key=" "$TMPDIR/settings.default" >> "$SETTINGS"
   done
+  # v3.1 deep voice defaults follow the new ones unless the user changed them
+  sed -i 's/^DEEP_PITCH=-2$/DEEP_PITCH=-2.5/; s/^DEEP_FORMANT=-4$/DEEP_FORMANT=-5/; s/^DEEP_BASS=4$/DEEP_BASS=5/' "$SETTINGS"
   ui_print "- Keeping your settings.conf"
 fi
 
@@ -85,9 +87,9 @@ gain_db=$(setting VOICE_GAIN_DB 0)
 gate=$(setting VOICE_GATE 1)
 gate_db=$(setting VOICE_GATE_DB 18)
 deep=$(setting VOICE_DEEP 1)
-deep_pitch=$(setting DEEP_PITCH -2)
-deep_formant=$(setting DEEP_FORMANT -4)
-deep_bass=$(setting DEEP_BASS 4)
+deep_pitch=$(setting DEEP_PITCH -2.5)
+deep_formant=$(setting DEEP_FORMANT -5)
+deep_bass=$(setting DEEP_BASS 5)
 EOF
 fi
 

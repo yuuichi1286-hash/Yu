@@ -143,9 +143,9 @@ static void settings_defaults(micns_settings *s) {
     s->gate_db = 18;
     s->postfilter = 1;
     s->deep = 0;
-    s->deep_pitch = -2.f;
-    s->deep_formant = -4.f;
-    s->deep_bass = 4.f;
+    s->deep_pitch = -2.5f;
+    s->deep_formant = -5.f;
+    s->deep_bass = 5.f;
 }
 
 static float clampf(float v, float lo, float hi) {
@@ -250,10 +250,19 @@ static void biquad_peaking(biquad *f, double fs, double f0, double q, double gai
 static void biquad_lowshelf(biquad *f, double fs, double f0, double gain_db) {
     double a = pow(10.0, gain_db / 40.0);
     double w = 2.0 * M_PI * f0 / fs, cw = cos(w);
-    double sa = sin(w) * sqrt(a); /* shelf slope S = 1 */
+    double sa = sin(w) * sqrt(a); /* Q = 1: a slight warm bump at the corner */
     biquad_set(f, a * ((a + 1) - (a - 1) * cw + sa), 2 * a * ((a - 1) - (a + 1) * cw),
                a * ((a + 1) - (a - 1) * cw - sa), (a + 1) + (a - 1) * cw + sa,
                -2 * ((a - 1) + (a + 1) * cw), (a + 1) + (a - 1) * cw - sa);
+}
+
+static void biquad_highshelf(biquad *f, double fs, double f0, double gain_db) {
+    double a = pow(10.0, gain_db / 40.0);
+    double w = 2.0 * M_PI * f0 / fs, cw = cos(w);
+    double sa = sin(w) * sqrt(2.0 * a); /* slope S = 1 */
+    biquad_set(f, a * ((a + 1) + (a - 1) * cw + sa), -2 * a * ((a - 1) + (a + 1) * cw),
+               a * ((a + 1) + (a - 1) * cw - sa), (a + 1) - (a - 1) * cw + sa,
+               2 * ((a - 1) - (a + 1) * cw), (a + 1) - (a - 1) * cw - sa);
 }
 
 static void biquad_run(biquad *f, float *x, int n) {
@@ -315,7 +324,7 @@ typedef struct {
     uint32_t out_pos, out_len, out_cap;
     float dry[MICNS_BLOCK];    /* last high-passed block, aligned with RNNoise delay */
     float den[MICNS_BLOCK];
-    biquad hpf, eq_low, eq_pres, bass;
+    biquad hpf, eq_low, eq_pres, air, bass;
     struct psola *ps;          /* deep voice state, NULL when off */
     int period;                /* pitch of the current block (48 kHz samples) */
     float pgain;               /* how periodic (voiced) it is, 0..1 */
@@ -416,8 +425,9 @@ static void ctx_reset_dsp(micns_ctx *x) {
         memset(c->out, 0, x->prime * sizeof(float));
         memset(c->dry, 0, sizeof(c->dry));
         biquad_highpass(&c->hpf, fs, 80.0, 0.7071);
-        biquad_peaking(&c->eq_low, fs, 250.0, 1.0, -1.5);
-        biquad_peaking(&c->eq_pres, fs, 3200.0, 0.9, 2.5);
+        biquad_peaking(&c->eq_low, fs, 250.0, 1.0, -2.0);
+        biquad_peaking(&c->eq_pres, fs, 3200.0, 0.9, 4.0);
+        biquad_highshelf(&c->air, fs, 5000.0, 4.0);
         biquad_lowshelf(&c->bass, fs, 150.0, x->set.deep_bass);
         rnnoise_set_postfilter(c->rnn, x->set.postfilter, 0.3f);
         c->period = c->vperiod = c->vheld = 0;
@@ -638,6 +648,7 @@ static float denoise_block(micns_ctx *x, micns_chan *c, const float *in, float *
     if (x->variant != VARIANT_PURE && x->set.clarity) {
         biquad_run(&c->eq_low, blk, MICNS_BLOCK);
         biquad_run(&c->eq_pres, blk, MICNS_BLOCK);
+        biquad_run(&c->air, blk, MICNS_BLOCK);
     }
     return vad;
 }

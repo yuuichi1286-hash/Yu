@@ -5,7 +5,7 @@ and L/R stereo swap) that adds Discord-style noise suppression to every
 microphone path on any Android device, plus an optional natural "deep
 voice" (pitch-shifted speech with preserved formants and a bass shelf).
 
-- Flashable zip: [`release/Mic_VolBoost_Swap_A2L-v3.1.zip`](release/Mic_VolBoost_Swap_A2L-v3.1.zip)
+- Flashable zip: [`release/Mic_VolBoost_Swap_A2L-v3.2.zip`](release/Mic_VolBoost_Swap_A2L-v3.2.zip)
 - User guide (Bahasa Indonesia): [`module/README.md`](module/README.md)
 
 ## Layout
